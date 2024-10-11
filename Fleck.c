@@ -14,6 +14,8 @@ typedef struct {
     int port;
 } Config;
 
+//tinc caca
+
 Config *fleckConfig;
 
 // Funció per escriure missatges a la consola sense printf
