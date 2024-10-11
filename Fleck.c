@@ -23,11 +23,12 @@ void writeMessage(const char *message) {
 }
 
 // Funció per llegir línies amb read i memòria dinàmica
+// Funció per llegir línies amb read
 ssize_t readLine(int fd, char *buffer, size_t size) {
     ssize_t bytesRead = 0;
-    ssize_t totalBytesRead = 0;
+    ssize_t totalBytesRead = 0;  // Canviar a ssize_t per mantenir el signe
     char ch;
-    while (totalBytesRead < size - 1 && (bytesRead = read(fd, &ch, 1)) > 0) {
+    while (totalBytesRead < (ssize_t)(size - 1) && (bytesRead = read(fd, &ch, 1)) > 0) {
         if (ch == '\n') {
             break;
         }
@@ -36,6 +37,7 @@ ssize_t readLine(int fd, char *buffer, size_t size) {
     buffer[totalBytesRead] = '\0'; // Terminar la cadena
     return totalBytesRead;
 }
+
 
 // Funció per convertir un string en enter
 int stringToInt(char *str) {
