@@ -19,19 +19,35 @@ void writeMessage(const char *message) {
     write(STDOUT_FILENO, message, strlen(message));
 }
 
-// Funció per llegir línies amb read i memòria dinàmica
-ssize_t readLine(int fd, char *buffer, size_t size) {
-    ssize_t bytesRead = 0;
-    ssize_t totalBytesRead = 0;
-    char ch;
-    while (totalBytesRead < (ssize_t)(size - 1) && (bytesRead = read(fd, &ch, 1)) > 0) {
-        if (ch == '\n') {
+// Funció per llegir fins a un caràcter delimitador
+char *readUntil(int fd, char cEnd) {
+    int i = 0;
+    ssize_t chars_read;
+    char c = 0;
+    char *buffer = NULL;
+
+    while (1) {
+        chars_read = read(fd, &c, sizeof(char));  
+        if (chars_read == 0) {         
+            if (i == 0) {              
+                return NULL;
+            }
+            break;                     
+        } else if (chars_read < 0) {   
+            free(buffer);
+            return NULL;
+        }
+
+        if (c == cEnd) {              
             break;
         }
-        buffer[totalBytesRead++] = ch;
+
+        buffer = (char *)realloc(buffer, i + 2);  // Assignar més espai
+        buffer[i++] = c;                
     }
-    buffer[totalBytesRead] = '\0'; // Terminar la cadena
-    return totalBytesRead;
+
+    buffer[i] = '\0';  // Finalitzar la cadena amb '\0'
+    return buffer;
 }
 
 // Funció per convertir un string en enter
@@ -45,7 +61,7 @@ int stringToInt(char *str) {
     return result;
 }
 
-// Funció per processar el fitxer de configuració utilitzant open, read i memòria dinàmica
+// Funció per processar el fitxer de configuració utilitzant open, readUntil i memòria dinàmica
 void readConfigFile(const char *configFile, Config *fleckConfig) {
     int fd = open(configFile, O_RDONLY);
     if (fd == -1) {
@@ -53,16 +69,18 @@ void readConfigFile(const char *configFile, Config *fleckConfig) {
         exit(1);
     }
 
-    readLine(fd, fleckConfig->user, BUFFER_SIZE);
-    readLine(fd, fleckConfig->directory, BUFFER_SIZE);
-    readLine(fd, fleckConfig->ip, BUFFER_SIZE);
+    // Llegir i assignar memòria per cada camp
+    fleckConfig->user = readUntil(fd, '\n');
+    fleckConfig->directory = readUntil(fd, '\n');
+    fleckConfig->ip = readUntil(fd, '\n');
 
-    char portStr[BUFFER_SIZE];
-    readLine(fd, portStr, BUFFER_SIZE);
-    fleckConfig->port = stringToInt(portStr); // Convertir a int manualment
+    char *portStr = readUntil(fd, '\n');
+    fleckConfig->port = stringToInt(portStr);
+    free(portStr);  // Alliberar memòria per a portStr després de convertir-la
 
     close(fd);
 
+    // Mostrar la configuració llegida
     writeMessage("Arthur user initialized\n");
     writeMessage("File read correctly:\n");
     writeMessage("User - ");
@@ -78,14 +96,8 @@ void readConfigFile(const char *configFile, Config *fleckConfig) {
 }
 
 // Funció per processar les comandes
-void processCommand(char *command, Config *fleckConfig) {
+void processCommand(char *command) {
     char *cmd = strtok(command, " ");  // Separar la primera paraula de la comanda
-
-    // Aquí pots accedir a fleckConfig si és necessari en alguna condició futura.
-    if (fleckConfig != NULL) {
-        // Exemples d'ús:
-        // writeMessage(fleckConfig->user);
-    }
 
     if (strcasecmp(cmd, "CONNECT") == 0) {
         writeMessage("Comanda OK\n");
@@ -123,20 +135,16 @@ void processCommand(char *command, Config *fleckConfig) {
     }
 }
 
-
 int main(int argc, char *argv[]) {
     // Crear la variable local a main()
-    Config *fleckConfig = (Config *)malloc(sizeof(Config)); 
-    fleckConfig->user = (char *)malloc(BUFFER_SIZE);
-    fleckConfig->directory = (char *)malloc(BUFFER_SIZE);
-    fleckConfig->ip = (char *)malloc(BUFFER_SIZE);
-
+    Config *fleckConfig = (Config *)malloc(sizeof(Config));
+    
     if (argc != 2) {
         writeMessage("Ús: ./fleck <fitxer de configuració>\n");
         exit(1);
     }
 
-    // Passar fleckConfig com a argument a readConfigFile
+    // Llegir el fitxer de configuració passant fleckConfig com a argument
     readConfigFile(argv[1], fleckConfig);
 
     // Línia de comandes
@@ -147,7 +155,7 @@ int main(int argc, char *argv[]) {
             break; // Sortir si EOF
         }
         command[strcspn(command, "\n")] = 0; // Eliminar el salt de línia
-        processCommand(command, fleckConfig);  // Passar fleckConfig com a argument
+        processCommand(command);
     }
 
     // Alliberar memòria dinàmica

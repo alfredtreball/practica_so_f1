@@ -20,19 +20,35 @@ void writeMessage(const char *message) {
     write(STDOUT_FILENO, message, strlen(message));
 }
 
-// Funció per llegir línies amb read i memòria dinàmica
-ssize_t readLine(int fd, char *buffer, size_t size) {
-    ssize_t bytesRead = 0;
-    ssize_t totalBytesRead = 0;
-    char ch;
-    while (totalBytesRead < (ssize_t)(size - 1) && (bytesRead = read(fd, &ch, 1)) > 0) {
-        if (ch == '\n') {
+// Funció per llegir fins a un caràcter delimitador
+char *readUntil(int fd, char cEnd) {
+    int i = 0;
+    ssize_t chars_read;
+    char c = 0;
+    char *buffer = NULL;
+
+    while (1) {
+        chars_read = read(fd, &c, sizeof(char));  
+        if (chars_read == 0) {         
+            if (i == 0) {              
+                return NULL;
+            }
+            break;                     
+        } else if (chars_read < 0) {   
+            free(buffer);
+            return NULL;
+        }
+
+        if (c == cEnd) {              
             break;
         }
-        buffer[totalBytesRead++] = ch;
+
+        buffer = (char *)realloc(buffer, i + 2);  // Alliberar més espai
+        buffer[i++] = c;                
     }
-    buffer[totalBytesRead] = '\0'; // Terminar la cadena
-    return totalBytesRead;
+
+    buffer[i] = '\0';  // Finalitzar la cadena amb '\0'
+    return buffer;
 }
 
 // Funció per convertir un string en enter
@@ -46,7 +62,7 @@ int stringToInt(char *str) {
     return result;
 }
 
-// Funció per llegir el fitxer de configuració utilitzant open, read i memòria dinàmica
+// Funció per llegir el fitxer de configuració utilitzant readUntil
 void readConfigFile(const char *configFile, HarleyConfig *harleyConfig) {
     int fd = open(configFile, O_RDONLY);
     if (fd == -1) {
@@ -55,17 +71,18 @@ void readConfigFile(const char *configFile, HarleyConfig *harleyConfig) {
     }
 
     // Llegir i assignar memòria per cada camp
-    readLine(fd, harleyConfig->gotham_ip, BUFFER_SIZE);
-    char portStr[BUFFER_SIZE];
-    readLine(fd, portStr, BUFFER_SIZE);
+    harleyConfig->gotham_ip = readUntil(fd, '\n');
+    char *portStr = readUntil(fd, '\n');
     harleyConfig->gotham_port = stringToInt(portStr);
+    free(portStr);  // Alliberar memòria per a portStr després de convertir-la
 
-    readLine(fd, harleyConfig->server_ip, BUFFER_SIZE);
-    readLine(fd, portStr, BUFFER_SIZE);
+    harleyConfig->server_ip = readUntil(fd, '\n');
+    portStr = readUntil(fd, '\n');
     harleyConfig->server_port = stringToInt(portStr);
+    free(portStr);
 
-    readLine(fd, harleyConfig->directory, BUFFER_SIZE);
-    readLine(fd, harleyConfig->worker_type, BUFFER_SIZE);
+    harleyConfig->directory = readUntil(fd, '\n');
+    harleyConfig->worker_type = readUntil(fd, '\n');
 
     close(fd);
 
@@ -96,11 +113,7 @@ void readConfigFile(const char *configFile, HarleyConfig *harleyConfig) {
 int main(int argc, char *argv[]) {
     // Crear la variable local a main()
     HarleyConfig *harleyConfig = (HarleyConfig *)malloc(sizeof(HarleyConfig));
-    harleyConfig->gotham_ip = (char *)malloc(BUFFER_SIZE);
-    harleyConfig->server_ip = (char *)malloc(BUFFER_SIZE);
-    harleyConfig->directory = (char *)malloc(BUFFER_SIZE);
-    harleyConfig->worker_type = (char *)malloc(BUFFER_SIZE);
-
+    
     if (argc != 2) {
         writeMessage("Ús: ./harley <fitxer de configuració>\n");
         exit(1);
