@@ -14,7 +14,6 @@ typedef struct {
     int port;
 } Config;
 
-//tinc caca
 
 Config *fleckConfig;
 
