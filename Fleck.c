@@ -48,46 +48,45 @@ char *readUntil(int fd, char cEnd) {
     return buffer;
 }
 
-// Funció per convertir un string en enter
-int stringToInt(char *str) {
-    int result = 0;
-    for (int i = 0; str[i] != '\0'; i++) {
-        if (str[i] >= '0' && str[i] <= '9') {
-            result = result * 10 + (str[i] - '0');
-        }
+//Funció per eliminar un char d'un string
+void removeChar(char *string, char charToRemove) {
+    char *origen, *dst;
+    for (origen = dst = string; *origen != '\0'; origen++) {
+        *dst = *origen;
+        if (*dst != charToRemove) dst++;
     }
-    return result;
+    *dst = '\0';
 }
 
 // Funció per processar el fitxer de configuració utilitzant open, readUntil i memòria dinàmica
 void readConfigFile(const char *configFile, Config *fleckConfig) {
     int fd = open(configFile, O_RDONLY);
     if (fd == -1) {
-        writeMessage("Error obrint el fitxer de configuració\n");
+        printF("Error obrint el fitxer de configuració\n");
         exit(1);
     }
 
     // Llegir i assignar memòria per cada camp
     fleckConfig->user = readUntil(fd, '\n');
+    removeChar(fleckConfig->user, '&'); //Eliminar '&' del nom de l'usuari (Consideració a tenir en compte)
     fleckConfig->directory = readUntil(fd, '\n');
     fleckConfig->ip = readUntil(fd, '\n');
 
     char *portStr = readUntil(fd, '\n');
-    fleckConfig->port = stringToInt(portStr);
+    fleckConfig->port = atoi(portStr);
     free(portStr);  // Alliberar memòria per a portStr després de convertir-la
-
     close(fd);
 
     // Mostrar la configuració llegida
-    writeMessage("Arthur user initialized\n");
-    writeMessage("File read correctly:\n");
-    writeMessage("User - ");
-    writeMessage(fleckConfig->user);
-    writeMessage("\nDirectory - ");
-    writeMessage(fleckConfig->directory);
-    writeMessage("\nIP - ");
-    writeMessage(fleckConfig->ip);
-    writeMessage("\nPort - ");
+    printF("Arthur user initialized\n");
+    printF("File read correctly:\n");
+    printF("User - ");
+    printF(fleckConfig->user);
+    printF("\nDirectory - ");
+    printF(fleckConfig->directory);
+    printF("\nIP - ");
+    printF(fleckConfig->ip);
+    printF("\nPort - ");
     char portMsg[BUFFER_SIZE];
     snprintf(portMsg, BUFFER_SIZE, "%d\n", fleckConfig->port);
     write(STDOUT_FILENO, portMsg, strlen(portMsg));
@@ -98,21 +97,21 @@ void processCommand(char *command) {
     char *cmd = strtok(command, " ");  // Separar la primera paraula de la comanda
 
     if (strcasecmp(cmd, "CONNECT") == 0) {
-        writeMessage("Comanda OK\n");
+        printF("Comanda OK\n");
     } else if (strcasecmp(cmd, "LOGOUT") == 0) {
-        writeMessage("Comanda OK\n");
+        printF("Comanda OK\n");
     } else if (strcasecmp(cmd, "LIST") == 0) {
         char *subCmd = strtok(NULL, " ");  // Segona part de la comanda
         if (subCmd != NULL) {
             if (strcasecmp(subCmd, "MEDIA") == 0) {
-                writeMessage("Comanda OK\n");
+                printF("Comanda OK\n");
             } else if (strcasecmp(subCmd, "TEXT") == 0) {
-                writeMessage("Comanda KO\n");
+                printF("Comanda KO\n");
             } else {
-                writeMessage("Unknown command\n");
+                printF("Unknown command\n");
             }
         } else {
-            writeMessage("Unknown command\n");
+            printF("Unknown command\n");
         }
     } else if (strcasecmp(cmd, "DISTORT") == 0) {
         char *file = strtok(NULL, " ");  // Primer paràmetre
@@ -121,15 +120,15 @@ void processCommand(char *command) {
         if (file != NULL && factorStr != NULL) {
             int factor = stringToInt(factorStr);  // Convertir el factor a int
             if (factor > 0) {
-                writeMessage("Comanda OK\n");
+                printF("Comanda OK\n");
             } else {
-                writeMessage("Comanda KO\n");
+                printF("Comanda KO\n");
             }
         } else {
-            writeMessage("Comanda KO\n");
+            printF("Comanda KO\n");
         }
     } else {
-        writeMessage("Unknown command\n");
+        printF("Unknown command\n");
     }
 }
 
@@ -138,7 +137,7 @@ int main(int argc, char *argv[]) {
     Config *fleckConfig = (Config *)malloc(sizeof(Config));
     
     if (argc != 2) {
-        writeMessage("Ús: ./fleck <fitxer de configuració>\n");
+        printF("Ús: ./fleck <fitxer de configuració>\n");
         exit(1);
     }
 
@@ -148,7 +147,7 @@ int main(int argc, char *argv[]) {
     // Línia de comandes
     char command[COMMAND_SIZE];
     while (1) {
-        writeMessage("$montserrat:> ");
+        printF("$montserrat:> ");
         if (!fgets(command, COMMAND_SIZE, stdin)) {
             break; // Sortir si EOF
         }
