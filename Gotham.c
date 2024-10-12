@@ -62,7 +62,7 @@ int stringToInt(char *str) {
 void readConfigFile(const char *configFile, GothamConfig *gothamConfig) {
     int fd = open(configFile, O_RDONLY);
     if (fd == -1) {
-        writeMessage("Error obrint el fitxer de configuració\n");
+        printF("Error obrint el fitxer de configuració\n");
         exit(1);
     }
 
@@ -78,14 +78,14 @@ void readConfigFile(const char *configFile, GothamConfig *gothamConfig) {
     close(fd);
 
     // Mostrar la configuració llegida
-    writeMessage("File read correctly:\n");
-    writeMessage("Server Name - ");
-    writeMessage(gothamConfig->server_name);
-    writeMessage("\nDirectory - ");
-    writeMessage(gothamConfig->directory);
-    writeMessage("\nIP - ");
-    writeMessage(gothamConfig->ip);
-    writeMessage("\nPort - ");
+    printF("File read correctly:\n");
+    printF("Server Name - ");
+    printF(gothamConfig->server_name);
+    printF("\nDirectory - ");
+    printF(gothamConfig->directory);
+    printF("\nIP - ");
+    printF(gothamConfig->ip);
+    printF("\nPort - ");
     char portMsg[BUFFER_SIZE];
     snprintf(portMsg, BUFFER_SIZE, "%d\n", gothamConfig->port);
     write(STDOUT_FILENO, portMsg, strlen(portMsg));
