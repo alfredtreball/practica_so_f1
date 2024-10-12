@@ -6,6 +6,8 @@
 
 #define BUFFER_SIZE 256
 
+#define printF(x) write(1, x, strlen(x)) //Macro per escriure missatges
+
 // Definició de l'estructura que conté la configuració de Gotham
 typedef struct {
     char *server_name;
@@ -13,11 +15,6 @@ typedef struct {
     char *ip;
     int port;
 } GothamConfig;
-
-// Funció per escriure missatges a la consola sense printf
-void writeMessage(const char *message) {
-    write(STDOUT_FILENO, message, strlen(message));
-}
 
 // Funció per llegir fins a un caràcter delimitador
 char *readUntil(int fd, char cEnd) {
