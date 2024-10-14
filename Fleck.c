@@ -128,7 +128,7 @@ void listMedia(char *directory) {
     DIR *dir;
     struct dirent *entry;
     int count = 0;
-    printf("Intentant obrir el directori: %s\n", directory);
+   // printf("Intentant obrir el directori: %s\n", directory);
     if (access(directory, F_OK) != 0) {
         perror("access error");
         return;
@@ -235,7 +235,7 @@ int main(int argc, char *argv[]) {
 
     char command[COMMAND_SIZE];
     while (1) {
-        writeMessage("$montserrat:> ");
+        writeMessage("$ ");
         if (!fgets(command, COMMAND_SIZE, stdin)) {
             break;
         }

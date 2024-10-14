@@ -7,11 +7,6 @@
 #include <sys/types.h>
 
 
-
-
-
-
-
 int main() {
 
     DIR *dir;
