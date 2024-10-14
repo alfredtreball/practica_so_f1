@@ -3,11 +3,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <dirent.h>  // Per treballar amb directoris
+#include <sys/types.h>
+#include <ctype.h>
 
-#define BUFFER_SIZE 256
+#define BUFFER_SIZE 512  // Augmentat per a noms de fitxers llargs
 #define COMMAND_SIZE 128
-
-#define printF(x) write(1, x, strlen(x)) //Macro per escriure missatges
 
 typedef struct {
     char *user;
@@ -16,6 +17,28 @@ typedef struct {
     int port;
 } Config;
 
+char *trim(char *str) {
+    char *end;
+
+    // Elimina espais al principi
+    while(isspace((unsigned char)*str)) str++;
+
+    if(*str == 0)  // Totes les lletres eren espais
+        return str;
+
+    // Elimina espais al final
+    end = str + strlen(str) - 1;
+    while(end > str && isspace((unsigned char)*end)) end--;
+
+    // Afegeix el caràcter nul al final de la cadena
+    *(end + 1) = '\0';
+
+    return str;
+}
+// Funció per escriure missatges a la consola sense printf
+void writeMessage(const char *message) {
+    write(STDOUT_FILENO, message, strlen(message));
+}
 
 // Funció per llegir fins a un caràcter delimitador
 char *readUntil(int fd, char cEnd) {
@@ -48,46 +71,49 @@ char *readUntil(int fd, char cEnd) {
     return buffer;
 }
 
-//Funció per eliminar un char d'un string
-void removeChar(char *string, char charToRemove) {
-    char *origen, *dst;
-    for (origen = dst = string; *origen != '\0'; origen++) {
-        *dst = *origen;
-        if (*dst != charToRemove) dst++;
+// Funció per convertir un string en enter
+int stringToInt(char *str) {
+    int result = 0;
+    for (int i = 0; str[i] != '\0'; i++) {
+        if (str[i] >= '0' && str[i] <= '9') {
+            result = result * 10 + (str[i] - '0');
+        }
     }
+<<<<<<< HEAD
 
     *dst = '\0';
+=======
+    return result;
+>>>>>>> cb28e935fa3bfae636c1c537adbc41e7c90943fd
 }
 
-// Funció per processar el fitxer de configuració utilitzant open, readUntil i memòria dinàmica
+// Funció per llegir el fitxer de configuració de Fleck
 void readConfigFile(const char *configFile, Config *fleckConfig) {
     int fd = open(configFile, O_RDONLY);
     if (fd == -1) {
-        printF("Error obrint el fitxer de configuració\n");
+        writeMessage("Error obrint el fitxer de configuració\n");
         exit(1);
     }
 
-    // Llegir i assignar memòria per cada camp
     fleckConfig->user = readUntil(fd, '\n');
-    removeChar(fleckConfig->user, '&'); //Eliminar '&' del nom de l'usuari (Consideració a tenir en compte)
-    fleckConfig->directory = readUntil(fd, '\n');
+    fleckConfig->directory = strdup(readUntil(fd, '\n'));  // Còpia modificable
+    fleckConfig->directory = trim(fleckConfig->directory);  // Elimina espais al principi i final
     fleckConfig->ip = readUntil(fd, '\n');
 
     char *portStr = readUntil(fd, '\n');
-    fleckConfig->port = atoi(portStr);
-    free(portStr);  // Alliberar memòria per a portStr després de convertir-la
+    fleckConfig->port = stringToInt(portStr);
+    free(portStr);
+
     close(fd);
 
-    // Mostrar la configuració llegida
-    printF("Arthur user initialized\n");
-    printF("File read correctly:\n");
-    printF("User - ");
-    printF(fleckConfig->user);
-    printF("\nDirectory - ");
-    printF(fleckConfig->directory);
-    printF("\nIP - ");
-    printF(fleckConfig->ip);
-    printF("\nPort - ");
+    writeMessage("File read correctly:\n");
+    writeMessage("User - ");
+    writeMessage(fleckConfig->user);
+    writeMessage("\nDirectory - ");
+    writeMessage(fleckConfig->directory);
+    writeMessage("\nIP - ");
+    writeMessage(fleckConfig->ip);
+    writeMessage("\nPort - ");
     char portMsg[BUFFER_SIZE];
     snprintf(portMsg, BUFFER_SIZE, "%d\n", fleckConfig->port);
     write(STDOUT_FILENO, portMsg, strlen(portMsg)); 
@@ -129,14 +155,91 @@ void separarParaules(char* string, const char* delimiter, char* estat){
 
 }
 
+<<<<<<< HEAD
 // Funció per processar les comandes
 void processCommand(char *command) {
     char* context = NULL;
     char *cmd = separarParaules(command, " ", &context);  // Separar la primera paraula de la comanda
+=======
+// Funció per determinar si una cadena acaba amb una extensió específica
+int endsWith(const char *str, const char *suffix) {
+    if (!str || !suffix) return 0;
+    size_t lenStr = strlen(str);
+    size_t lenSuffix = strlen(suffix);
+    if (lenSuffix > lenStr) return 0;
+    return strncmp(str + lenStr - lenSuffix, suffix, lenSuffix) == 0;
+}
+
+// Funció per llistar fitxers de media (amb extensions .wav, .png, .jpg)
+void listMedia(char *directory) {
+    DIR *dir;
+    struct dirent *entry;
+    int count = 0;
+   // printf("Intentant obrir el directori: %s\n", directory);
+    if (access(directory, F_OK) != 0) {
+        perror("access error");
+        return;
+    }
+    if ((dir = opendir(directory)) == NULL) {
+        writeMessage("Error obrint el directori\n");
+        return;
+    }
+
+    writeMessage("Media files available:\n");
+    while ((entry = readdir(dir)) != NULL) {
+        if (endsWith(entry->d_name, ".wav") || endsWith(entry->d_name, ".png") || endsWith(entry->d_name, ".jpg")) {
+            char buffer[BUFFER_SIZE];
+            snprintf(buffer, BUFFER_SIZE, "%d. %.250s\n", ++count, entry->d_name);  // Limit de 250 caràcters
+            writeMessage(buffer);
+        }
+    }
+
+    if (count == 0) {
+        writeMessage("No media files found\n");
+    }
+
+    closedir(dir);
+}
+
+// Funció per llistar fitxers de text (amb extensió .txt)
+void listText(char *directory) {
+    DIR *dir;
+    struct dirent *entry;
+    int count = 0;
+
+    printf("Intentant obrir el directori: %s\n", directory);
+    directory[strcspn(directory, "\n")] = 0;  // Elimina qualsevol salt de línia extra
+
+    if ((dir = opendir(directory)) == NULL) {
+        writeMessage("Error obrint el directori\n");
+        return;
+    }
+
+    writeMessage("Text files available:\n");
+    while ((entry = readdir(dir)) != NULL) {
+        if (endsWith(entry->d_name, ".txt")) {
+            char buffer[BUFFER_SIZE];
+            snprintf(buffer, BUFFER_SIZE, "%d. %.250s\n", ++count, entry->d_name);  // Limit de 250 caràcters
+            writeMessage(buffer);
+        }
+    }
+
+    if (count == 0) {
+        writeMessage("No text files found\n");
+    }
+
+    closedir(dir);
+}
+
+// Funció per processar les comandes de l'usuari
+void processCommand(char *command, char *directory) {
+    char *cmd = strtok(command, " ");
+>>>>>>> cb28e935fa3bfae636c1c537adbc41e7c90943fd
 
     if (strcasecmp(cmd, "CONNECT") == 0) {
-        printF("Comanda OK\n");
+        writeMessage("Comanda OK: CONNECT\n");
     } else if (strcasecmp(cmd, "LOGOUT") == 0) {
+<<<<<<< HEAD
         printF("Comanda OK\n");
     } else if (strcasecmp(cmd, "LIST") == 0) {
         char *subCmd = separarParaules(NULL, " ", &context);  // Segona part de la comanda
@@ -157,43 +260,60 @@ void processCommand(char *command) {
 
         if (file != NULL && factorStr != NULL) {
             int factor = atoi(factorStr);  // Convertir el factor a int
+=======
+        writeMessage("Comanda OK: LOGOUT\n");
+    } else if (strcasecmp(cmd, "DISTORT") == 0) {
+        char *file = strtok(NULL, " ");
+        char *factorStr = strtok(NULL, " ");
+        if (file != NULL && factorStr != NULL) {
+            int factor = stringToInt(factorStr);
+>>>>>>> cb28e935fa3bfae636c1c537adbc41e7c90943fd
             if (factor > 0) {
-                printF("Comanda OK\n");
+                writeMessage("Distorsion started!\n");
             } else {
-                printF("Comanda KO\n");
+                writeMessage("Comanda KO: factor incorrecte\n");
             }
         } else {
-            printF("Comanda KO\n");
+            writeMessage("Comanda KO: arguments incorrectes\n");
+        }
+    } else if (strcasecmp(cmd, "LIST") == 0) {
+        char *listType = strtok(NULL, " ");
+        if (listType != NULL) {
+            if (strcasecmp(listType, "MEDIA") == 0) {
+                listMedia(directory);  // Llistar fitxers media
+            } else if (strcasecmp(listType, "TEXT") == 0) {
+                listText(directory);  // Llistar fitxers de text
+            } else {
+                writeMessage("Comanda KO: tipus de llista desconegut\n");
+            }
+        } else {
+            writeMessage("Comanda KO: falta especificar MEDIA o TEXT\n");
         }
     } else {
-        printF("Unknown command\n");
+        writeMessage("ERROR: Please input a valid command.\n");
     }
 }
 
 int main(int argc, char *argv[]) {
-    // Crear la variable local a main()
     Config *fleckConfig = (Config *)malloc(sizeof(Config));
     
     if (argc != 2) {
-        printF("Ús: ./fleck <fitxer de configuració>\n");
+        writeMessage("Ús: ./fleck <fitxer de configuració>\n");
         exit(1);
     }
 
-    // Llegir el fitxer de configuració passant fleckConfig com a argument
     readConfigFile(argv[1], fleckConfig);
 
-    // Línia de comandes
     char command[COMMAND_SIZE];
     while (1) {
-        printF("$montserrat:> ");
+        writeMessage("$ ");
         if (!fgets(command, COMMAND_SIZE, stdin)) {
-            break; // Sortir si EOF
+            break;
         }
-        command[strcspn(command, "\n")] = 0; // Eliminar el salt de línia
-        processCommand(command);
+        command[strcspn(command, "\n")] = 0;
+        processCommand(command, fleckConfig->directory);
     }
 
-    // Alliberar memòria dinàmica
     free(fleckConfig->user);
     free(fleckConfig->directory);
     free(fleckConfig->ip);
