@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <dirent.h>  // Per treballar amb directoris
 #include <sys/types.h>
+#include <ctype.h>
 
 #define BUFFER_SIZE 512  // Augmentat per a noms de fitxers llargs
 #define COMMAND_SIZE 128
@@ -16,10 +17,27 @@ typedef struct {
     int port;
 } Config;
 
+char *trim(char *str) {
+    char *end;
+
+    // Elimina espais al principi
+    while(isspace((unsigned char)*str)) str++;
+
+    if(*str == 0)  // Totes les lletres eren espais
+        return str;
+
+    // Elimina espais al final
+    end = str + strlen(str) - 1;
+    while(end > str && isspace((unsigned char)*end)) end--;
+
+    // Afegeix el caràcter nul al final de la cadena
+    *(end + 1) = '\0';
+
+    return str;
+}
 // Funció per escriure missatges a la consola sense printf
 void writeMessage(const char *message) {
     write(STDOUT_FILENO, message, strlen(message));
-    //free(message);
 }
 
 // Funció per llegir fins a un caràcter delimitador
@@ -73,7 +91,8 @@ void readConfigFile(const char *configFile, Config *fleckConfig) {
     }
 
     fleckConfig->user = readUntil(fd, '\n');
-    fleckConfig->directory = readUntil(fd, '\n');
+    fleckConfig->directory = strdup(readUntil(fd, '\n'));  // Còpia modificable
+    fleckConfig->directory = trim(fleckConfig->directory);  // Elimina espais al principi i final
     fleckConfig->ip = readUntil(fd, '\n');
 
     char *portStr = readUntil(fd, '\n');
@@ -105,7 +124,7 @@ int endsWith(const char *str, const char *suffix) {
 }
 
 // Funció per llistar fitxers de media (amb extensions .wav, .png, .jpg)
-void listMedia(const char *directory) {
+void listMedia(char *directory) {
     DIR *dir;
     struct dirent *entry;
     int count = 0;
@@ -136,16 +155,13 @@ void listMedia(const char *directory) {
 }
 
 // Funció per llistar fitxers de text (amb extensió .txt)
-void listText(const char *directory) {
+void listText(char *directory) {
     DIR *dir;
     struct dirent *entry;
     int count = 0;
 
     printf("Intentant obrir el directori: %s\n", directory);
-    if (access(directory, F_OK) != 0) {
-        perror("access error");
-        return;
-    }
+    directory[strcspn(directory, "\n")] = 0;  // Elimina qualsevol salt de línia extra
 
     if ((dir = opendir(directory)) == NULL) {
         writeMessage("Error obrint el directori\n");
@@ -169,7 +185,7 @@ void listText(const char *directory) {
 }
 
 // Funció per processar les comandes de l'usuari
-void processCommand(char *command, const char *directory) {
+void processCommand(char *command, char *directory) {
     char *cmd = strtok(command, " ");
 
     if (strcasecmp(cmd, "CONNECT") == 0) {
