@@ -55,6 +55,7 @@ void removeChar(char *string, char charToRemove) {
         *dst = *origen;
         if (*dst != charToRemove) dst++;
     }
+
     *dst = '\0';
 }
 
@@ -89,19 +90,56 @@ void readConfigFile(const char *configFile, Config *fleckConfig) {
     printF("\nPort - ");
     char portMsg[BUFFER_SIZE];
     snprintf(portMsg, BUFFER_SIZE, "%d\n", fleckConfig->port);
-    write(STDOUT_FILENO, portMsg, strlen(portMsg));
+    write(STDOUT_FILENO, portMsg, strlen(portMsg)); 
+}
+
+void separarParaules(char* string, const char* delimiter, char* estat){
+    char* posicio = NULL;
+
+    if(string != NULL){
+        posicio = string;
+    } else {
+        if(context == NULL){
+            return NULL;
+        })
+
+        posicio = context;
+    }
+
+    while(*posicio && strchar(delimiter, *posicio)){
+        posicio++;
+    }
+
+    if(*posicio == '\0'){
+        return NULL;
+    }
+
+    char *iniciParaula = posicio;
+
+    while(*posicio !& strchr(delimiter, *posicio)){
+        posicio++;
+    }
+
+    if(*posicio){
+        *posicio = '\0';
+        posicio++;
+    }
+
+    return iniciParaula;
+
 }
 
 // Funció per processar les comandes
 void processCommand(char *command) {
-    char *cmd = strtok(command, " ");  // Separar la primera paraula de la comanda
+    char* context = NULL;
+    char *cmd = separarParaules(command, " ", &context);  // Separar la primera paraula de la comanda
 
     if (strcasecmp(cmd, "CONNECT") == 0) {
         printF("Comanda OK\n");
     } else if (strcasecmp(cmd, "LOGOUT") == 0) {
         printF("Comanda OK\n");
     } else if (strcasecmp(cmd, "LIST") == 0) {
-        char *subCmd = strtok(NULL, " ");  // Segona part de la comanda
+        char *subCmd = separarParaules(NULL, " ", &context);  // Segona part de la comanda
         if (subCmd != NULL) {
             if (strcasecmp(subCmd, "MEDIA") == 0) {
                 printF("Comanda OK\n");
@@ -114,11 +152,11 @@ void processCommand(char *command) {
             printF("Unknown command\n");
         }
     } else if (strcasecmp(cmd, "DISTORT") == 0) {
-        char *file = strtok(NULL, " ");  // Primer paràmetre
-        char *factorStr = strtok(NULL, " ");  // Segon paràmetre (factor)
+        char *file = separarParaules(NULL, " ", &context);  // Primer paràmetre
+        char *factorStr = separarParaules(NULL, " ", &context);  // Segon paràmetre (factor)
 
         if (file != NULL && factorStr != NULL) {
-            int factor = stringToInt(factorStr);  // Convertir el factor a int
+            int factor = atoi(factorStr);  // Convertir el factor a int
             if (factor > 0) {
                 printF("Comanda OK\n");
             } else {

@@ -47,22 +47,11 @@ char *readUntil(int fd, char cEnd) {
     return buffer;
 }
 
-// Funció per convertir un string en enter
-int stringToInt(char *str) {
-    int result = 0;
-    for (int i = 0; str[i] != '\0'; i++) {
-        if (str[i] >= '0' && str[i] <= '9') {
-            result = result * 10 + (str[i] - '0');
-        }
-    }
-    return result;
-}
-
 // Funció per llegir el fitxer de configuració d'Enigma
 void readConfigFile(const char *configFile, EnigmaConfig *enigmaConfig) {
     int fd = open(configFile, O_RDONLY);
     if (fd == -1) {
-        writeMessage("Error obrint el fitxer de configuració\n");
+        printF("Error obrint el fitxer de configuració\n");
         exit(1);
     }
 
@@ -72,20 +61,20 @@ void readConfigFile(const char *configFile, EnigmaConfig *enigmaConfig) {
     enigmaConfig->ip = readUntil(fd, '\n');
 
     char *portStr = readUntil(fd, '\n');
-    enigmaConfig->port = stringToInt(portStr);
+    enigmaConfig->port = atoi(portStr);
     free(portStr);  // Alliberar memòria per a portStr després de convertir-la
 
     close(fd);
 
     // Mostrar la configuració llegida
-    writeMessage("File read correctly:\n");
-    writeMessage("Server Name - ");
-    writeMessage(enigmaConfig->server_name);
-    writeMessage("\nDirectory - ");
-    writeMessage(enigmaConfig->directory);
-    writeMessage("\nIP - ");
-    writeMessage(enigmaConfig->ip);
-    writeMessage("\nPort - ");
+    printF("File read correctly:\n");
+    printF("Server Name - ");
+    printF(enigmaConfig->server_name);
+    printF("\nDirectory - ");
+    printF(enigmaConfig->directory);
+    printF("\nIP - ");
+    printF(enigmaConfig->ip);
+    printF("\nPort - ");
     char portMsg[BUFFER_SIZE];
     snprintf(portMsg, BUFFER_SIZE, "%d\n", enigmaConfig->port);
     write(STDOUT_FILENO, portMsg, strlen(portMsg));
@@ -96,7 +85,7 @@ int main(int argc, char *argv[]) {
     EnigmaConfig *enigmaConfig = (EnigmaConfig *)malloc(sizeof(EnigmaConfig));
     
     if (argc != 2) {
-        writeMessage("Ús: ./enigma <fitxer de configuració>\n");
+        printF("Ús: ./enigma <fitxer de configuració>\n");
         exit(1);
     }
 

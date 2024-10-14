@@ -49,34 +49,23 @@ char *readUntil(int fd, char cEnd) {
     return buffer;
 }
 
-// Funció per convertir un string en enter
-int stringToInt(char *str) {
-    int result = 0;
-    for (int i = 0; str[i] != '\0'; i++) {
-        if (str[i] >= '0' && str[i] <= '9') {
-            result = result * 10 + (str[i] - '0');
-        }
-    }
-    return result;
-}
-
 // Funció per llegir el fitxer de configuració utilitzant readUntil
 void readConfigFile(const char *configFile, HarleyConfig *harleyConfig) {
     int fd = open(configFile, O_RDONLY);
     if (fd == -1) {
-        writeMessage("Error obrint el fitxer de configuració\n");
+        printF("Error obrint el fitxer de configuració\n");
         exit(1);
     }
 
     // Llegir i assignar memòria per cada camp
     harleyConfig->gotham_ip = readUntil(fd, '\n');
     char *portStr = readUntil(fd, '\n');
-    harleyConfig->gotham_port = stringToInt(portStr);
+    harleyConfig->gotham_port = atoi(portStr);
     free(portStr);  // Alliberar memòria per a portStr després de convertir-la
 
     harleyConfig->server_ip = readUntil(fd, '\n');
     portStr = readUntil(fd, '\n');
-    harleyConfig->server_port = stringToInt(portStr);
+    harleyConfig->server_port = atoi(portStr);
     free(portStr);
 
     harleyConfig->directory = readUntil(fd, '\n');
@@ -85,27 +74,27 @@ void readConfigFile(const char *configFile, HarleyConfig *harleyConfig) {
     close(fd);
 
     // Mostrar la configuració llegida
-    writeMessage("File read correctly:\n");
-    writeMessage("Gotham IP - ");
-    writeMessage(harleyConfig->gotham_ip);
-    writeMessage("\nGotham Port - ");
+    printF("File read correctly:\n");
+    printF("Gotham IP - ");
+    printF(harleyConfig->gotham_ip);
+    printF("\nGotham Port - ");
     
     char portMsg[BUFFER_SIZE];
     snprintf(portMsg, BUFFER_SIZE, "%d\n", harleyConfig->gotham_port);
     write(STDOUT_FILENO, portMsg, strlen(portMsg));
 
-    writeMessage("Server IP - ");
-    writeMessage(harleyConfig->server_ip);
-    writeMessage("\nServer Port - ");
+    printF("Server IP - ");
+    printF(harleyConfig->server_ip);
+    printF("\nServer Port - ");
     
     snprintf(portMsg, BUFFER_SIZE, "%d\n", harleyConfig->server_port);
     write(STDOUT_FILENO, portMsg, strlen(portMsg));
 
-    writeMessage("Directory - ");
-    writeMessage(harleyConfig->directory);
-    writeMessage("\nWorker Type - ");
-    writeMessage(harleyConfig->worker_type);
-    writeMessage("\n");
+    printF("Directory - ");
+    printF(harleyConfig->directory);
+    printF("\nWorker Type - ");
+    printF(harleyConfig->worker_type);
+    printF("\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -113,7 +102,7 @@ int main(int argc, char *argv[]) {
     HarleyConfig *harleyConfig = (HarleyConfig *)malloc(sizeof(HarleyConfig));
     
     if (argc != 2) {
-        writeMessage("Ús: ./harley <fitxer de configuració>\n");
+        printF("Ús: ./harley <fitxer de configuració>\n");
         exit(1);
     }
 

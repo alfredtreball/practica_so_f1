@@ -47,17 +47,6 @@ char *readUntil(int fd, char cEnd) {
     return buffer;
 }
 
-// Funció per convertir un string en enter
-int stringToInt(char *str) {
-    int result = 0;
-    for (int i = 0; str[i] != '\0'; i++) {
-        if (str[i] >= '0' && str[i] <= '9') {
-            result = result * 10 + (str[i] - '0');
-        }
-    }
-    return result;
-}
-
 // Funció per llegir el fitxer de configuració de Gotham
 void readConfigFile(const char *configFile, GothamConfig *gothamConfig) {
     int fd = open(configFile, O_RDONLY);
@@ -72,7 +61,7 @@ void readConfigFile(const char *configFile, GothamConfig *gothamConfig) {
     gothamConfig->ip = readUntil(fd, '\n');
 
     char *portStr = readUntil(fd, '\n');
-    gothamConfig->port = stringToInt(portStr);
+    gothamConfig->port = atoi(portStr);
     free(portStr);  // Alliberar memòria per a portStr després de convertir-la
 
     close(fd);
@@ -96,7 +85,7 @@ int main(int argc, char *argv[]) {
     GothamConfig *gothamConfig = (GothamConfig *)malloc(sizeof(GothamConfig));
     
     if (argc != 2) {
-        writeMessage("Ús: ./gotham <fitxer de configuració>\n");
+        printF("Ús: ./gotham <fitxer de configuració>\n");
         exit(1);
     }
 
