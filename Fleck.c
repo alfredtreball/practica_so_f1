@@ -16,6 +16,24 @@ typedef struct {
     int port;
 } Config;
 
+char *trim(char *str) {
+    char *end;
+
+    // Elimina espais al principi
+    while(isspace((unsigned char)*str)) str++;
+
+    if(*str == 0)  // Totes les lletres eren espais
+        return str;
+
+    // Elimina espais al final
+    end = str + strlen(str) - 1;
+    while(end > str && isspace((unsigned char)*end)) end--;
+
+    // Afegeix el caràcter nul al final de la cadena
+    *(end + 1) = '\0';
+
+    return str;
+}
 
 // Funció per llegir fins a un caràcter delimitador
 char *readUntil(int fd, char cEnd) {
