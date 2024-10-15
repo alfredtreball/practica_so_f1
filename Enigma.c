@@ -1,3 +1,4 @@
+#define _GNU_SOURCE // Asegura que asprintf esté disponible
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,10 +11,12 @@
 
 // Definició de l'estructura que conté la configuració d'Enigma
 typedef struct {
-    char *server_name;
-    char *directory;
-    char *ip;
-    int port;
+    char *ipGotham;
+    int portGotham;
+    char *ipFleck;
+    int portFleck;
+    char* directory;
+    char* workerType;
 } EnigmaConfig;
 
 // Funció per llegir fins a un caràcter delimitador
@@ -56,28 +59,55 @@ void readConfigFile(const char *configFile, EnigmaConfig *enigmaConfig) {
     }
 
     // Llegir i assignar memòria per cada camp
-    enigmaConfig->server_name = readUntil(fd, '\n');
-    enigmaConfig->directory = readUntil(fd, '\n');
-    enigmaConfig->ip = readUntil(fd, '\n');
+    enigmaConfig->ipGotham = readUntil(fd, '\n');
+    char* portGotham = readUntil(fd, '\n');
+    enigmaConfig->portGotham = atoi(portGotham);
+    free(portGotham);
 
-    char *portStr = readUntil(fd, '\n');
-    enigmaConfig->port = atoi(portStr);
-    free(portStr);  // Alliberar memòria per a portStr després de convertir-la
+    enigmaConfig->ipFleck = readUntil(fd, '\n');
+    char *portFleck = readUntil(fd, '\n');
+    enigmaConfig->portFleck = atoi(portFleck);
+    free(portFleck);  // Alliberar memòria per a portStr després de convertir-la
+
+    enigmaConfig->directory = readUntil(fd, '\n');
+    enigmaConfig->workerType = readUntil(fd, '\n');
 
     close(fd);
 
     // Mostrar la configuració llegida
-    printF("File read correctly:\n");
-    printF("Server Name - ");
-    printF(enigmaConfig->server_name);
-    printF("\nDirectory - ");
+    printF("Ip Gotham - ");
+    printF(enigmaConfig->ipGotham);
+    printF("\nPort Gotham - ");
+    char* portGothamStr = NULL;
+    asprintf(&portGothamStr, "%d", enigmaConfig->portGotham);
+    printF(portGothamStr);
+    free(portGothamStr);
+
+    printF("\nIp fleck - ");
+    printF(enigmaConfig->ipFleck);
+    printF("\nPort Fleck - ");
+    char* portFleckStr = NULL;
+    asprintf(&portFleckStr, "%d", enigmaConfig->portFleck);
+    printF(portFleckStr);
+    free(portFleckStr);
+
+    printF("\nDirectory Enigma - ");
     printF(enigmaConfig->directory);
-    printF("\nIP - ");
-    printF(enigmaConfig->ip);
-    printF("\nPort - ");
-    char portMsg[BUFFER_SIZE];
-    snprintf(portMsg, BUFFER_SIZE, "%d\n", enigmaConfig->port);
-    write(STDOUT_FILENO, portMsg, strlen(portMsg));
+
+    printF("\nWorker Type - ");
+    printF(enigmaConfig->workerType);
+    printF("\n");
+
+}
+
+void alliberarMemoria(EnigmaConfig *enigmaConfig) {
+    if (enigmaConfig->ipGotham) {
+        free(enigmaConfig->ipGotham);
+    }
+    if (enigmaConfig->ipFleck) {
+        free(enigmaConfig->ipFleck);
+    }
+    free(enigmaConfig); // Finalmente, liberar el propio struct
 }
 
 int main(int argc, char *argv[]) {
@@ -92,11 +122,8 @@ int main(int argc, char *argv[]) {
     // Llegir la configuració passant enigmaConfig com a argument
     readConfigFile(argv[1], enigmaConfig);
 
-    // Alliberar memòria dinàmica
-    free(enigmaConfig->server_name);
-    free(enigmaConfig->directory);
-    free(enigmaConfig->ip);
-    free(enigmaConfig);
+    // Allibear memòria dnàmica
+    alliberarMemoria(enigmaConfig);
 
     return 0;
 }

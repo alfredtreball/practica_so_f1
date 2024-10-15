@@ -5,8 +5,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#define BUFFER_SIZE 256
-
 #define printF(x) write(1, x, strlen(x)) // Macro per escriure missatges
 
 // Definició de l'estructura que conté la configuració de Gotham
@@ -82,10 +80,9 @@ void readConfigFile(const char *configFile, GothamConfig *gothamConfig) {
     printF(gothamConfig->ipHarEni);
     printF("\nPort Harley Enigma - ");
     char* portHarEniStr = NULL; // Renombrar para evitar conflictos
-    asprintf(&portHarEniStr, "%d", gothamConfig->portHarEni); // Asignar memoria dinámica
+    asprintf(&portHarEniStr, "%d\n", gothamConfig->portHarEni); // Asignar memoria dinámica
     printF(portHarEniStr); // Imprimir el puerto en forma de cadena
     free(portHarEniStr); // Liberar memoria
-    printF("\n");
 }
 
 // Función para liberar la memoria de GothamConfig
