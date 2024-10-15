@@ -1,20 +1,19 @@
+#define _GNU_SOURCE //asprintf OK
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 
-#define BUFFER_SIZE 256
-
 #define printF(x) write(1, x, strlen(x)) //Macro per escriure missatges
 
 typedef struct {
-    char *gotham_ip;
-    int gotham_port;
-    char *server_ip;
-    int server_port;
+    char *ipGotham;
+    int portGotham;
+    char *ipFleck;
+    int portFleck;
     char *directory;
-    char *worker_type;
+    char *workerType;
 } HarleyConfig;
 
 
@@ -58,43 +57,54 @@ void readConfigFile(const char *configFile, HarleyConfig *harleyConfig) {
     }
 
     // Llegir i assignar memòria per cada camp
-    harleyConfig->gotham_ip = readUntil(fd, '\n');
-    char *portStr = readUntil(fd, '\n');
-    harleyConfig->gotham_port = atoi(portStr);
-    free(portStr);  // Alliberar memòria per a portStr després de convertir-la
+    harleyConfig->ipGotham = readUntil(fd, '\n');
+    char *portGotham = readUntil(fd, '\n');
+    harleyConfig->portGotham = atoi(portGotham);
+    free(portGotham);  // Alliberar memòria per a portStr després de convertir-la
 
-    harleyConfig->server_ip = readUntil(fd, '\n');
-    portStr = readUntil(fd, '\n');
-    harleyConfig->server_port = atoi(portStr);
-    free(portStr);
+    harleyConfig->ipFleck = readUntil(fd, '\n');
+    char* portFleck = readUntil(fd, '\n');
+    harleyConfig->portFleck = atoi(portFleck);
+    free(portFleck);
 
     harleyConfig->directory = readUntil(fd, '\n');
-    harleyConfig->worker_type = readUntil(fd, '\n');
+    harleyConfig->workerType = readUntil(fd, '\n');
 
     close(fd);
 
     // Mostrar la configuració llegida
     printF("File read correctly:\n");
     printF("Gotham IP - ");
-    printF(harleyConfig->gotham_ip);
+    printF(harleyConfig->ipGotham);
     printF("\nGotham Port - ");
-    
-    char portMsg[BUFFER_SIZE];
-    snprintf(portMsg, BUFFER_SIZE, "%d\n", harleyConfig->gotham_port);
-    write(STDOUT_FILENO, portMsg, strlen(portMsg));
+    char* portGothamStr = NULL;
+    asprintf(&portGothamStr, "%d", harleyConfig->portGotham);
+    printF(portGothamStr);
+    free(portGothamStr);
 
-    printF("Server IP - ");
-    printF(harleyConfig->server_ip);
-    printF("\nServer Port - ");
-    
-    snprintf(portMsg, BUFFER_SIZE, "%d\n", harleyConfig->server_port);
-    write(STDOUT_FILENO, portMsg, strlen(portMsg));
+    printF("\nIp fleck - ");
+    printF(harleyConfig->ipFleck);
+    printF("\nPortFleck - ");
+    char* portFleckStr = NULL;
+    asprintf(&portFleckStr, "%d", harleyConfig->portFleck);
+    printF(portFleckStr);
+    free(portFleckStr);
 
-    printF("Directory - ");
+    printF("\nDirectory - ");
     printF(harleyConfig->directory);
     printF("\nWorker Type - ");
-    printF(harleyConfig->worker_type);
+    printF(harleyConfig->workerType);
     printF("\n");
+}
+
+void alliberarMemoria(HarleyConfig *harleyConfig) {
+    if (harleyConfig->ipGotham) {
+        free(harleyConfig->ipGotham);
+    }
+    if (harleyConfig->ipFleck) {
+        free(harleyConfig->ipFleck);
+    }
+    free(harleyConfig); // Finalmente, liberar el propio struct
 }
 
 int main(int argc, char *argv[]) {
@@ -110,11 +120,7 @@ int main(int argc, char *argv[]) {
     readConfigFile(argv[1], harleyConfig);
 
     // Alliberar memòria dinàmica
-    free(harleyConfig->gotham_ip);
-    free(harleyConfig->server_ip);
-    free(harleyConfig->directory);
-    free(harleyConfig->worker_type);
-    free(harleyConfig);
+    alliberarMemoria(harleyConfig);
 
     return 0;
 }
