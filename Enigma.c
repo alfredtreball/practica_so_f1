@@ -5,8 +5,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#define BUFFER_SIZE 256
-
 #define printF(x) write(1, x, strlen(x)) //Macro per escriure missatges
 
 // Definició de l'estructura que conté la configuració d'Enigma
