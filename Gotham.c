@@ -1,3 +1,4 @@
+#define _GNU_SOURCE // Asegura que asprintf esté disponible
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,7 +7,7 @@
 
 #define BUFFER_SIZE 256
 
-#define printF(x) write(1, x, strlen(x)) //Macro per escriure missatges
+#define printF(x) write(1, x, strlen(x)) // Macro per escriure missatges
 
 // Definició de l'estructura que conté la configuració de Gotham
 typedef struct {
@@ -63,20 +64,28 @@ void readConfigFile(const char *configFile, GothamConfig *gothamConfig) {
 
     gothamConfig->ipHarEni = readUntil(fd, '\n');
     char *portHarEni = readUntil(fd, '\n');
-    gothamConfig->port = atoi(portHarEni);
-    free(portStr);  // Alliberar memòria port Harley Enigma
+    gothamConfig->portHarEni = atoi(portHarEni);
+    free(portHarEni);  // Alliberar memòria port Harley Enigma
 
     close(fd);
 
     // Mostrar la configuració llegida
     printF("IpFleck - ");
     printF(gothamConfig->ipFleck);
-    printF("\nPort fleck - ");
-    printF(gothamConfig->portFleck);
+    printF("\nPort Fleck - ");
+    char* portFleckStr = NULL; // Renombrar para evitar conflictos
+    asprintf(&portFleckStr, "%d", gothamConfig->portFleck); // Asignar memoria dinámica
+    printF(portFleckStr); // Imprimir el puerto en forma de cadena
+    free(portFleckStr); // Liberar memoria
+
     printF("\nIP Harley Engima - ");
     printF(gothamConfig->ipHarEni);
     printF("\nPort Harley Enigma - ");
-    printF(gothamConfig->portHarEni);
+    char* portHarEniStr = NULL; // Renombrar para evitar conflictos
+    asprintf(&portHarEniStr, "%d", gothamConfig->portHarEni); // Asignar memoria dinámica
+    printF(portHarEniStr); // Imprimir el puerto en forma de cadena
+    free(portHarEniStr); // Liberar memoria
+    printF("\n");
 }
 
 // Función para liberar la memoria de GothamConfig
@@ -89,7 +98,6 @@ void alliberarMemoria(GothamConfig *gothamConfig) {
     }
     free(gothamConfig); // Finalmente, liberar el propio struct
 }
-
 
 int main(int argc, char *argv[]) {
     // Crear la variable local a main()
