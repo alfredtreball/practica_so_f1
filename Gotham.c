@@ -10,10 +10,10 @@
 
 // Definició de l'estructura que conté la configuració de Gotham
 typedef struct {
-    char *server_name;
-    char *directory;
-    char *ip;
-    int port;
+    char *ipFleck;
+    int portFleck;
+    char *ipHarEni;
+    int portHarEni;
 } GothamConfig;
 
 // Funció per llegir fins a un caràcter delimitador
@@ -56,29 +56,40 @@ void readConfigFile(const char *configFile, GothamConfig *gothamConfig) {
     }
 
     // Llegir i assignar memòria per cada camp
-    gothamConfig->server_name = readUntil(fd, '\n');
-    gothamConfig->directory = readUntil(fd, '\n');
-    gothamConfig->ip = readUntil(fd, '\n');
+    gothamConfig->ipFleck = readUntil(fd, '\n');
+    char* portFleck = readUntil(fd, '\n');
+    gothamConfig->portFleck = atoi(portFleck);
+    free(portFleck); // Alliberar memòria port fleck
 
-    char *portStr = readUntil(fd, '\n');
-    gothamConfig->port = atoi(portStr);
-    free(portStr);  // Alliberar memòria per a portStr després de convertir-la
+    gothamConfig->ipHarEni = readUntil(fd, '\n');
+    char *portHarEni = readUntil(fd, '\n');
+    gothamConfig->port = atoi(portHarEni);
+    free(portStr);  // Alliberar memòria port Harley Enigma
 
     close(fd);
 
     // Mostrar la configuració llegida
-    printF("File read correctly:\n");
-    printF("Server Name - ");
-    printF(gothamConfig->server_name);
-    printF("\nDirectory - ");
-    printF(gothamConfig->directory);
-    printF("\nIP - ");
-    printF(gothamConfig->ip);
-    printF("\nPort - ");
-    char portMsg[BUFFER_SIZE];
-    snprintf(portMsg, BUFFER_SIZE, "%d\n", gothamConfig->port);
-    write(STDOUT_FILENO, portMsg, strlen(portMsg));
+    printF("IpFleck - ");
+    printF(gothamConfig->ipFleck);
+    printF("\nPort fleck - ");
+    printF(gothamConfig->portFleck);
+    printF("\nIP Harley Engima - ");
+    printF(gothamConfig->ipHarEni);
+    printF("\nPort Harley Enigma - ");
+    printF(gothamConfig->portHarEni);
 }
+
+// Función para liberar la memoria de GothamConfig
+void alliberarMemoria(GothamConfig *gothamConfig) {
+    if (gothamConfig->ipFleck) {
+        free(gothamConfig->ipFleck);
+    }
+    if (gothamConfig->ipHarEni) {
+        free(gothamConfig->ipHarEni);
+    }
+    free(gothamConfig); // Finalmente, liberar el propio struct
+}
+
 
 int main(int argc, char *argv[]) {
     // Crear la variable local a main()
@@ -93,10 +104,7 @@ int main(int argc, char *argv[]) {
     readConfigFile(argv[1], gothamConfig);
 
     // Alliberar memòria dinàmica
-    free(gothamConfig->server_name);
-    free(gothamConfig->directory);
-    free(gothamConfig->ip);
-    free(gothamConfig);
+    alliberarMemoria(gothamConfig);
 
     return 0;
 }

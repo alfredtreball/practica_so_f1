@@ -209,7 +209,6 @@ ssize_t readLine(char *buffer, size_t max_size) {
 }
 
 int main(int argc, char *argv[]) {
-    // Crear la variable local a main()
     Config *fleckConfig = (Config *)malloc(sizeof(Config));
     
     if (argc != 2) {
