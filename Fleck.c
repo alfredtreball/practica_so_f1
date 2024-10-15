@@ -1,3 +1,4 @@
+#define _GNU_SOURCE //asprintf OK
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -5,7 +6,6 @@
 #include <fcntl.h>
 #include <ctype.h> // Para isspace
 
-#define BUFFER_SIZE 256
 #define COMMAND_SIZE 128
 
 #define printF(x) write(1, x, strlen(x)) // Macro para escribir mensajes
@@ -13,9 +13,9 @@
 typedef struct {
     char *user;
     char *directory;
-    char *ip;
-    int port;
-} Config;
+    char *ipGotham;
+    int portGotham;
+} FleckConfig;
 
 char *trim(char *str) {
     char *end;
@@ -78,7 +78,7 @@ void removeChar(char *string, char charToRemove) {
 }
 
 // Función para procesar el archivo de configuración usando open, readUntil y memoria dinámica
-void readConfigFile(const char *configFile, Config *fleckConfig) {
+void readConfigFile(const char *configFile, FleckConfig *fleckConfig) {
     int fd = open(configFile, O_RDONLY);
     if (fd == -1) {
         printF("Error abriendo el archivo de configuración\n");
@@ -89,26 +89,26 @@ void readConfigFile(const char *configFile, Config *fleckConfig) {
     fleckConfig->user = readUntil(fd, '\n');
     removeChar(fleckConfig->user, '&'); // Elimina '&' del nombre del usuario
     fleckConfig->directory = trim(readUntil(fd, '\n')); // Elimina espacios del path del directorio
-    fleckConfig->ip = readUntil(fd, '\n');
+    fleckConfig->ipGotham = readUntil(fd, '\n');
 
     char *portStr = readUntil(fd, '\n');
-    fleckConfig->port = atoi(portStr);
+    fleckConfig->portGotham = atoi(portStr);
     free(portStr);  // Libera memoria para portStr después de convertirla
     close(fd);
 
     // Muestra la configuración leída
-    printF("Arthur user initialized\n");
-    printF("File read correctly:\n");
     printF("User - ");
     printF(fleckConfig->user);
     printF("\nDirectory - ");
     printF(fleckConfig->directory);
     printF("\nIP - ");
-    printF(fleckConfig->ip);
+    printF(fleckConfig->ipGotham);
+
     printF("\nPort - ");
-    char portMsg[BUFFER_SIZE];
-    snprintf(portMsg, BUFFER_SIZE, "%d\n", fleckConfig->port);
-    write(STDOUT_FILENO, portMsg, strlen(portMsg)); 
+    char* portGothamStr = NULL;
+    asprintf(&portGothamStr, "%d\n", fleckConfig->portGotham);
+    printF(portGothamStr);
+    free(portGothamStr);
 }
 
 // Función para separar palabras sin usar strtok
@@ -208,8 +208,23 @@ ssize_t readLine(char *buffer, size_t max_size) {
     return total_read;
 }
 
+void alliberarMemoria(FleckConfig *fleckConfig){
+    if (fleckConfig->user) {
+        free(fleckConfig->user);
+    }
+    if (fleckConfig->directory) {
+        free(fleckConfig->directory);
+    }
+
+    if(fleckConfig->ipGotham){
+        free(fleckConfig->ipGotham);
+    }
+    
+    free(fleckConfig); // Finalmente, liberar el propio struct
+}
+
 int main(int argc, char *argv[]) {
-    Config *fleckConfig = (Config *)malloc(sizeof(Config));
+    FleckConfig *fleckConfig = (FleckConfig *)malloc(sizeof(FleckConfig));
     
     if (argc != 2) {
         printF("Ús: ./fleck <fitxer de configuració>\n");
@@ -236,10 +251,6 @@ int main(int argc, char *argv[]) {
     }
 
     // Libera memoria dinámica
-    free(fleckConfig->user);
-    free(fleckConfig->directory);
-    free(fleckConfig->ip);
-    free(fleckConfig);
-
+    alliberarMemoria(fleckConfig);
     return 0;
 }

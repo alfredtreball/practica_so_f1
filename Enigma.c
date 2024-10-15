@@ -105,6 +105,15 @@ void alliberarMemoria(EnigmaConfig *enigmaConfig) {
     if (enigmaConfig->ipFleck) {
         free(enigmaConfig->ipFleck);
     }
+
+    if(enigmaConfig->directory){
+        free(enigmaConfig->directory);
+    }
+
+    if(enigmaConfig->workerType){
+        free(enigmaConfig->workerType);
+    }
+
     free(enigmaConfig); // Finalmente, liberar el propio struct
 }
 

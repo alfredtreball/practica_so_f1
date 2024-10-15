@@ -104,6 +104,15 @@ void alliberarMemoria(HarleyConfig *harleyConfig) {
     if (harleyConfig->ipFleck) {
         free(harleyConfig->ipFleck);
     }
+
+    if(harleyConfig->directory){
+        free(harleyConfig->directory);
+    }
+
+    if(harleyConfig->workerType){
+        free(harleyConfig->workerType);
+    }
+
     free(harleyConfig); // Finalmente, liberar el propio struct
 }
 
