@@ -1,7 +1,7 @@
 #define _GNU_SOURCE //asprintf OK
 #include "Fleck.h"
 
-void listMedia(char *directory) {
+/*void listMedia(char *directory) {
     DIR *dir;
     struct dirent *entry;
     int count = 0;
@@ -111,8 +111,7 @@ void listText(char *directory) {
     closedir(dir);
 }
 
-
-
+*/
 
 // Función para procesar el archivo de configuración usando open, readUntil y memoria dinámica
 void readConfigFile(const char *configFile, FleckConfig *fleckConfig) {
@@ -150,7 +149,7 @@ void readConfigFile(const char *configFile, FleckConfig *fleckConfig) {
 
 
 
-void processCommand(char *command, char *directory) {
+void processCommand(char *command /*char *directory*/) {
     char* context = NULL;
     char *cmd = separarParaules(command, " ", &context);  // Separa la primera paraula del comandament
 
@@ -163,10 +162,10 @@ void processCommand(char *command, char *directory) {
         if (subCmd != NULL) {
             if (strcasecmp(subCmd, "MEDIA") == 0) {
                 printF("Comanda OK:");
-                listMedia(directory);
+                //listMedia(directory);
             } else if (strcasecmp(subCmd, "TEXT") == 0) {
                 printF("Comanda OK:");
-                listText(directory);
+                //listText(directory);
             } else {
                 printF("Comanda KO: tipus de llista desconegut\n");
             }
@@ -233,7 +232,7 @@ int main(int argc, char *argv[]) {
 
         
         
-        processCommand(command, fleckConfig->directory);
+        processCommand(command /*fleckConfig->directory*/);
         free(command);  // Allibera la memòria de la comanda després de cada ús
     }
 

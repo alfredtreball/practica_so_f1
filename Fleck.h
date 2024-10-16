@@ -29,7 +29,7 @@ char *readUntil(int fd, char cEnd);
 void removeChar(char *string, char charToRemove);
 void readConfigFile(const char *configFile, FleckConfig *fleckConfig);
 char *separarParaules(char *string, const char *delimiter, char **context);
-void processCommand(char *command, char *directory);
+void processCommand(char *command /*char *directory*/);
 void alliberarMemoria(FleckConfig *fleckConfig);
 
 #endif // FLECK_H
