@@ -1,21 +1,12 @@
 #define _GNU_SOURCE // Asegura que asprintf esté disponible
+#include "Gotham.h" // Incluye el archivo de encabezado
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 
-#define printF(x) write(1, x, strlen(x)) // Macro per escriure missatges
-
-// Definició de l'estructura que conté la configuració de Gotham
-typedef struct {
-    char *ipFleck;
-    int portFleck;
-    char *ipHarEni;
-    int portHarEni;
-} GothamConfig;
-
-// Funció per llegir fins a un caràcter delimitador
+// Función para leer hasta un carácter delimitador
 char *readUntil(int fd, char cEnd) {
     int i = 0;
     ssize_t chars_read;
@@ -38,51 +29,51 @@ char *readUntil(int fd, char cEnd) {
             break;
         }
 
-        buffer = (char *)realloc(buffer, i + 2);  // Assignar més espai
+        buffer = (char *)realloc(buffer, i + 2);  // Asigna más espacio
         buffer[i++] = c;                
     }
 
-    buffer[i] = '\0';  // Finalitzar la cadena amb '\0'
+    buffer[i] = '\0';  // Finaliza la cadena con '\0'
     return buffer;
 }
 
-// Funció per llegir el fitxer de configuració de Gotham
+// Función para leer el archivo de configuración de Gotham
 void readConfigFile(const char *configFile, GothamConfig *gothamConfig) {
     int fd = open(configFile, O_RDONLY);
     if (fd == -1) {
-        printF("Error obrint el fitxer de configuració\n");
+        printF("Error abriendo el archivo de configuración\n");
         exit(1);
     }
 
-    // Llegir i assignar memòria per cada camp
+    // Lee y asigna memoria para cada campo
     gothamConfig->ipFleck = readUntil(fd, '\n');
     char* portFleck = readUntil(fd, '\n');
     gothamConfig->portFleck = atoi(portFleck);
-    free(portFleck); // Alliberar memòria port fleck
+    free(portFleck);
 
     gothamConfig->ipHarEni = readUntil(fd, '\n');
     char *portHarEni = readUntil(fd, '\n');
     gothamConfig->portHarEni = atoi(portHarEni);
-    free(portHarEni);  // Alliberar memòria port Harley Enigma
+    free(portHarEni);
 
     close(fd);
 
-    // Mostrar la configuració llegida
+    // Muestra la configuración leída
     printF("IpFleck - ");
     printF(gothamConfig->ipFleck);
     printF("\nPort Fleck - ");
-    char* portFleckStr = NULL; // Renombrar para evitar conflictos
-    asprintf(&portFleckStr, "%d", gothamConfig->portFleck); // Asignar memoria dinámica
-    printF(portFleckStr); // Imprimir el puerto en forma de cadena
-    free(portFleckStr); // Liberar memoria
+    char* portFleckStr = NULL;
+    asprintf(&portFleckStr, "%d", gothamConfig->portFleck);
+    printF(portFleckStr);
+    free(portFleckStr);
 
-    printF("\nIP Harley Engima - ");
+    printF("\nIP Harley Enigma - ");
     printF(gothamConfig->ipHarEni);
     printF("\nPort Harley Enigma - ");
-    char* portHarEniStr = NULL; // Renombrar para evitar conflictos
-    asprintf(&portHarEniStr, "%d\n", gothamConfig->portHarEni); // Asignar memoria dinámica
-    printF(portHarEniStr); // Imprimir el puerto en forma de cadena
-    free(portHarEniStr); // Liberar memoria
+    char* portHarEniStr = NULL;
+    asprintf(&portHarEniStr, "%d\n", gothamConfig->portHarEni);
+    printF(portHarEniStr);
+    free(portHarEniStr);
 }
 
 // Función para liberar la memoria de GothamConfig
@@ -93,11 +84,10 @@ void alliberarMemoria(GothamConfig *gothamConfig) {
     if (gothamConfig->ipHarEni) {
         free(gothamConfig->ipHarEni);
     }
-    free(gothamConfig); // Finalmente, liberar el propio struct
+    free(gothamConfig);
 }
 
 int main(int argc, char *argv[]) {
-    // Crear la variable local a main()
     GothamConfig *gothamConfig = (GothamConfig *)malloc(sizeof(GothamConfig));
     
     if (argc != 2) {
@@ -105,10 +95,10 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    // Llegir la configuració passant gothamConfig com a argument
+    // Lee la configuración pasando gothamConfig como argumento
     readConfigFile(argv[1], gothamConfig);
 
-    // Alliberar memòria dinàmica
+    // Libera memoria dinámica
     alliberarMemoria(gothamConfig);
 
     return 0;

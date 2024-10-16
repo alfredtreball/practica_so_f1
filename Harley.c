@@ -1,23 +1,12 @@
-#define _GNU_SOURCE //asprintf OK
+#define _GNU_SOURCE // Asegura que asprintf esté disponible
+#include "Harley.h" // Incluye el archivo de encabezado
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 
-#define printF(x) write(1, x, strlen(x)) //Macro per escriure missatges
-
-typedef struct {
-    char *ipGotham;
-    int portGotham;
-    char *ipFleck;
-    int portFleck;
-    char *directory;
-    char *workerType;
-} HarleyConfig;
-
-
-// Funció per llegir fins a un caràcter delimitador
+// Función para leer hasta un carácter delimitador
 char *readUntil(int fd, char cEnd) {
     int i = 0;
     ssize_t chars_read;
@@ -40,27 +29,27 @@ char *readUntil(int fd, char cEnd) {
             break;
         }
 
-        buffer = (char *)realloc(buffer, i + 2);  // Alliberar més espai
+        buffer = (char *)realloc(buffer, i + 2);  // Asigna más espacio
         buffer[i++] = c;                
     }
 
-    buffer[i] = '\0';  // Finalitzar la cadena amb '\0'
+    buffer[i] = '\0';  // Finaliza la cadena con '\0'
     return buffer;
 }
 
-// Funció per llegir el fitxer de configuració utilitzant readUntil
+// Función para leer el archivo de configuración de Harley
 void readConfigFile(const char *configFile, HarleyConfig *harleyConfig) {
     int fd = open(configFile, O_RDONLY);
     if (fd == -1) {
-        printF("Error obrint el fitxer de configuració\n");
+        printF("Error abriendo el archivo de configuración\n");
         exit(1);
     }
 
-    // Llegir i assignar memòria per cada camp
+    // Lee y asigna memoria para cada campo
     harleyConfig->ipGotham = readUntil(fd, '\n');
     char *portGotham = readUntil(fd, '\n');
     harleyConfig->portGotham = atoi(portGotham);
-    free(portGotham);  // Alliberar memòria per a portStr després de convertir-la
+    free(portGotham);
 
     harleyConfig->ipFleck = readUntil(fd, '\n');
     char* portFleck = readUntil(fd, '\n');
@@ -72,7 +61,7 @@ void readConfigFile(const char *configFile, HarleyConfig *harleyConfig) {
 
     close(fd);
 
-    // Mostrar la configuració llegida
+    // Mostrar la configuración leída
     printF("File read correctly:\n");
     printF("Gotham IP - ");
     printF(harleyConfig->ipGotham);
@@ -97,6 +86,7 @@ void readConfigFile(const char *configFile, HarleyConfig *harleyConfig) {
     printF("\n");
 }
 
+// Función para liberar la memoria asignada dinámicamente para HarleyConfig
 void alliberarMemoria(HarleyConfig *harleyConfig) {
     if (harleyConfig->ipGotham) {
         free(harleyConfig->ipGotham);
@@ -104,31 +94,28 @@ void alliberarMemoria(HarleyConfig *harleyConfig) {
     if (harleyConfig->ipFleck) {
         free(harleyConfig->ipFleck);
     }
-
-    if(harleyConfig->directory){
+    if (harleyConfig->directory) {
         free(harleyConfig->directory);
     }
-
-    if(harleyConfig->workerType){
+    if (harleyConfig->workerType) {
         free(harleyConfig->workerType);
     }
-
-    free(harleyConfig); // Finalmente, liberar el propio struct
+    free(harleyConfig); // Finalmente, libera la estructura en sí
 }
 
 int main(int argc, char *argv[]) {
-    // Crear la variable local a main()
+    // Crea la variable local en main
     HarleyConfig *harleyConfig = (HarleyConfig *)malloc(sizeof(HarleyConfig));
     
     if (argc != 2) {
-        printF("Ús: ./harley <fitxer de configuració>\n");
+        printF("Uso: ./harley <archivo de configuración>\n");
         exit(1);
     }
 
-    // Llegir la configuració passant harleyConfig com a argument
+    // Lee la configuración pasando harleyConfig como argumento
     readConfigFile(argv[1], harleyConfig);
 
-    // Alliberar memòria dinàmica
+    // Libera memoria dinámica
     alliberarMemoria(harleyConfig);
 
     return 0;

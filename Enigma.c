@@ -1,23 +1,12 @@
 #define _GNU_SOURCE // Asegura que asprintf esté disponible
+#include "Enigma.h" // Incluye el archivo de encabezado
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 
-#define printF(x) write(1, x, strlen(x)) //Macro per escriure missatges
-
-// Definició de l'estructura que conté la configuració d'Enigma
-typedef struct {
-    char *ipGotham;
-    int portGotham;
-    char *ipFleck;
-    int portFleck;
-    char* directory;
-    char* workerType;
-} EnigmaConfig;
-
-// Funció per llegir fins a un caràcter delimitador
+// Función para leer hasta un carácter delimitador
 char *readUntil(int fd, char cEnd) {
     int i = 0;
     ssize_t chars_read;
@@ -40,23 +29,23 @@ char *readUntil(int fd, char cEnd) {
             break;
         }
 
-        buffer = (char *)realloc(buffer, i + 2);  // Assignar més espai
+        buffer = (char *)realloc(buffer, i + 2);  // Asigna más espacio
         buffer[i++] = c;                
     }
 
-    buffer[i] = '\0';  // Finalitzar la cadena amb '\0'
+    buffer[i] = '\0';  // Finaliza la cadena con '\0'
     return buffer;
 }
 
-// Funció per llegir el fitxer de configuració d'Enigma
+// Función para leer el archivo de configuración de Enigma
 void readConfigFile(const char *configFile, EnigmaConfig *enigmaConfig) {
     int fd = open(configFile, O_RDONLY);
     if (fd == -1) {
-        printF("Error obrint el fitxer de configuració\n");
+        printF("Error abriendo el archivo de configuración\n");
         exit(1);
     }
 
-    // Llegir i assignar memòria per cada camp
+    // Lee y asigna memoria para cada campo
     enigmaConfig->ipGotham = readUntil(fd, '\n');
     char* portGotham = readUntil(fd, '\n');
     enigmaConfig->portGotham = atoi(portGotham);
@@ -65,14 +54,14 @@ void readConfigFile(const char *configFile, EnigmaConfig *enigmaConfig) {
     enigmaConfig->ipFleck = readUntil(fd, '\n');
     char *portFleck = readUntil(fd, '\n');
     enigmaConfig->portFleck = atoi(portFleck);
-    free(portFleck);  // Alliberar memòria per a portStr després de convertir-la
+    free(portFleck);
 
     enigmaConfig->directory = readUntil(fd, '\n');
     enigmaConfig->workerType = readUntil(fd, '\n');
 
     close(fd);
 
-    // Mostrar la configuració llegida
+    // Muestra la configuración leída
     printF("Ip Gotham - ");
     printF(enigmaConfig->ipGotham);
     printF("\nPort Gotham - ");
@@ -81,7 +70,7 @@ void readConfigFile(const char *configFile, EnigmaConfig *enigmaConfig) {
     printF(portGothamStr);
     free(portGothamStr);
 
-    printF("\nIp fleck - ");
+    printF("\nIp Fleck - ");
     printF(enigmaConfig->ipFleck);
     printF("\nPort Fleck - ");
     char* portFleckStr = NULL;
@@ -95,9 +84,9 @@ void readConfigFile(const char *configFile, EnigmaConfig *enigmaConfig) {
     printF("\nWorker Type - ");
     printF(enigmaConfig->workerType);
     printF("\n");
-
 }
 
+// Función para liberar la memoria asignada dinámicamente para EnigmaConfig
 void alliberarMemoria(EnigmaConfig *enigmaConfig) {
     if (enigmaConfig->ipGotham) {
         free(enigmaConfig->ipGotham);
@@ -105,31 +94,28 @@ void alliberarMemoria(EnigmaConfig *enigmaConfig) {
     if (enigmaConfig->ipFleck) {
         free(enigmaConfig->ipFleck);
     }
-
-    if(enigmaConfig->directory){
+    if (enigmaConfig->directory) {
         free(enigmaConfig->directory);
     }
-
-    if(enigmaConfig->workerType){
+    if (enigmaConfig->workerType) {
         free(enigmaConfig->workerType);
     }
-
-    free(enigmaConfig); // Finalmente, liberar el propio struct
+    free(enigmaConfig); // Finalmente, libera la estructura en sí
 }
 
 int main(int argc, char *argv[]) {
-    // Crear la variable local a main()
+    // Crea la variable local en main
     EnigmaConfig *enigmaConfig = (EnigmaConfig *)malloc(sizeof(EnigmaConfig));
     
     if (argc != 2) {
-        printF("Ús: ./enigma <fitxer de configuració>\n");
+        printF("Uso: ./enigma <archivo de configuración>\n");
         exit(1);
     }
 
-    // Llegir la configuració passant enigmaConfig com a argument
+    // Lee la configuración pasando enigmaConfig como argumento
     readConfigFile(argv[1], enigmaConfig);
 
-    // Allibear memòria dnàmica
+    // Libera memoria dinámica
     alliberarMemoria(enigmaConfig);
 
     return 0;
