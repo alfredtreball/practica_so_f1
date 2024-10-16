@@ -1,22 +1,4 @@
-#define _GNU_SOURCE //asprintf OK
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <ctype.h> // Para isspace
-#include <dirent.h> // Per treballar amb directoris
-
-#define printF(x) write(1, x, strlen(x)) // Macro para escribir mensajes
-
-//fork amb execv de ls
-
-typedef struct {
-    char *user;
-    char *directory;
-    char *ipGotham;
-    int portGotham;
-} FleckConfig;
+#include "Fleck.h"
 
 int endsWith(char *str, char *suffix) {
     if (!str || !suffix) return 0;

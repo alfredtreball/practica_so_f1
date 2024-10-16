@@ -22,7 +22,7 @@ int main() {
     }
 
     //printf("Intentant obrir el directori: %s\n", dir);
-
+//tinc molta caca
 
 
     return 0;
