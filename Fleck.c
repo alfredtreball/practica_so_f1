@@ -1,4 +1,5 @@
 #include "Fleck.h"
+#include "Utils.h"
 
 int endsWith(char *str, char *suffix) {
     if (!str || !suffix) return 0;

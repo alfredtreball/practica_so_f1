@@ -1,4 +1,5 @@
 #include "Harley.h" // Incluye el archivo de encabezado
+#include "Utils.h"
 
 // Función para leer hasta un carácter delimitador
 char *readUntil(int fd, char cEnd) {
