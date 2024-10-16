@@ -24,9 +24,6 @@ typedef struct {
 
 // Prototipos de funciones
 
-// Lee hasta el carácter delimitador especificado y devuelve una cadena con el contenido leído
-char *readUntil(int fd, char cEnd);
-
 // Lee el archivo de configuración de Harley y asigna los valores en la estructura HarleyConfig
 void readConfigFile(const char *configFile, HarleyConfig *harleyConfig);
 

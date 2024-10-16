@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <ctype.h> // Per a isspace
 #include <dirent.h> // Per treballar amb directoris
+#include "Utils.h"
 
 #define _GNU_SOURCE //asprintf OK
 #define printF(x) write(1, x, strlen(x)) // Macro per escriure missatges

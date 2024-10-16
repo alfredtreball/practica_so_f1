@@ -1,36 +1,4 @@
 #include "Enigma.h" // Incluye el archivo de encabezado
-#include "Utils.h"
-
-// Función para leer hasta un carácter delimitador
-char *readUntil(int fd, char cEnd) {
-    int i = 0;
-    ssize_t chars_read;
-    char c = 0;
-    char *buffer = NULL;
-
-    while (1) {
-        chars_read = read(fd, &c, sizeof(char));  
-        if (chars_read == 0) {         
-            if (i == 0) {              
-                return NULL;
-            }
-            break;                     
-        } else if (chars_read < 0) {   
-            free(buffer);
-            return NULL;
-        }
-
-        if (c == cEnd) {              
-            break;
-        }
-
-        buffer = (char *)realloc(buffer, i + 2);  // Asigna más espacio
-        buffer[i++] = c;                
-    }
-
-    buffer[i] = '\0';  // Finaliza la cadena con '\0'
-    return buffer;
-}
 
 // Función para leer el archivo de configuración de Enigma
 void readConfigFile(const char *configFile, EnigmaConfig *enigmaConfig) {

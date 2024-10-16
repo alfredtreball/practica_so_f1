@@ -1,8 +1,5 @@
 #include "Utils.h"
 
-void printF(const char *str) {
-    write(STDOUT_FILENO, str, strlen(str));
-}
 
 char *readUntil(int fd, char cEnd) {
     int i = 0;

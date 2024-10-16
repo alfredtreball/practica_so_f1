@@ -1,13 +1,7 @@
 #include "Fleck.h"
 #include "Utils.h"
 
-int endsWith(char *str, char *suffix) {
-    if (!str || !suffix) return 0;
-    size_t lenStr = strlen(str);
-    size_t lenSuffix = strlen(suffix);
-    if (lenSuffix > lenStr) return 0;
-    return strncmp(str + lenStr - lenSuffix, suffix, lenSuffix) == 0;
-}
+
 
 void listMedia(char *directory) {
     DIR *dir;
@@ -120,65 +114,7 @@ void listText(char *directory) {
 }
 
 
-char *trim(char *str) {
-    char *end;
 
-    // Elimina espacios al principio
-    while(isspace((unsigned char)*str)) str++;
-
-    if(*str == 0)  // Todas las letras eran espacios
-        return str;
-
-    // Elimina espacios al final
-    end = str + strlen(str) - 1;
-    while(end > str && isspace((unsigned char)*end)) end--;
-
-    // Añade el carácter nulo al final de la cadena
-    *(end + 1) = '\0';
-
-    return str;
-}
-
-// Función para leer hasta un carácter delimitador
-char *readUntil(int fd, char cEnd) {
-    int i = 0;
-    ssize_t chars_read;
-    char c = 0;
-    char *buffer = NULL;
-
-    while (1) {
-        chars_read = read(fd, &c, sizeof(char));  
-        if (chars_read == 0) {         
-            if (i == 0) {              
-                return NULL;
-            }
-            break;                     
-        } else if (chars_read < 0) {   
-            free(buffer);
-            return NULL;
-        }
-
-        if (c == cEnd) {              
-            break;
-        }
-
-        buffer = (char *)realloc(buffer, i + 2);  // Asigna más espacio
-        buffer[i++] = c;                
-    }
-
-    buffer[i] = '\0';  // Finaliza la cadena con '\0'
-    return buffer;
-}
-
-// Función para eliminar un char de una cadena
-void removeChar(char *string, char charToRemove) {
-    char *origen, *dst;
-    for (origen = dst = string; *origen != '\0'; origen++) {
-        *dst = *origen;
-        if (*dst != charToRemove) dst++;
-    }
-    *dst = '\0';
-}
 
 // Función para procesar el archivo de configuración usando open, readUntil y memoria dinámica
 void readConfigFile(const char *configFile, FleckConfig *fleckConfig) {
@@ -214,42 +150,7 @@ void readConfigFile(const char *configFile, FleckConfig *fleckConfig) {
     free(portGothamStr);
 }
 
-// Función para separar palabras sin usar strtok
-char* separarParaules(char* string, const char* delimiter, char** context){
-    char* posicio = NULL;
 
-    if (string != NULL) {
-        posicio = string;
-    } else {
-        if (*context == NULL) {
-            return NULL;
-        }
-        posicio = *context;
-    }
-
-    while (*posicio && strchr(delimiter, *posicio)) {
-        posicio++;
-    }
-
-    if (*posicio == '\0') {
-        *context = NULL;
-        return NULL;
-    }
-
-    char *iniciParaula = posicio;
-
-    while (*posicio && !strchr(delimiter, *posicio)) {
-        posicio++;
-    }
-
-    if (*posicio) {
-        *posicio = '\0';
-        posicio++;
-    }
-
-    *context = posicio;
-    return iniciParaula;
-}
 
 void processCommand(char *command, char *directory) {
     char* context = NULL;

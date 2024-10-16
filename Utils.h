@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <ctype.h>
 
+#define printF(x) write(1, x, strlen(x))
+
 // Funciones de utilidad general
 char *readUntil(int fd, char cEnd);
 char* separarParaules(char* string, const char* delimiter, char** context);
