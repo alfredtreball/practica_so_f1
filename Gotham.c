@@ -1,10 +1,4 @@
-#define _GNU_SOURCE // Asegura que asprintf esté disponible
 #include "Gotham.h" // Incluye el archivo de encabezado
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
 
 // Función para leer hasta un carácter delimitador
 char *readUntil(int fd, char cEnd) {

@@ -1,6 +1,8 @@
 #ifndef HARLEYCONFIG_H
 #define HARLEYCONFIG_H
 
+#define _GNU_SOURCE // Asegura que asprintf esté disponible
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

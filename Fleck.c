@@ -7,8 +7,9 @@
 #include <ctype.h> // Para isspace
 #include <dirent.h> // Per treballar amb directoris
 
-
 #define printF(x) write(1, x, strlen(x)) // Macro para escribir mensajes
+
+//fork amb execv de ls
 
 typedef struct {
     char *user;
@@ -279,9 +280,11 @@ void processCommand(char *command, char *directory) {
         char *subCmd = separarParaules(NULL, " ", &context);  // Segona part del comandament
         if (subCmd != NULL) {
             if (strcasecmp(subCmd, "MEDIA") == 0) {
-                listMedia(directory);
+                printF("Comanda OK:");
+                //listMedia(directory);
             } else if (strcasecmp(subCmd, "TEXT") == 0) {
-                listText(directory);
+                printF("Comanda OK:");
+                //listText(directory);
             } else {
                 printF("Comanda KO: tipus de llista desconegut\n");
             }
