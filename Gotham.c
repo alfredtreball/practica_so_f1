@@ -1,7 +1,5 @@
+#define _GNU_SOURCE //asprintf OK
 #include "Gotham.h" // Incluye el archivo de encabezado
-
-
-
 
 // Función para leer el archivo de configuración de Gotham
 void readConfigFile(const char *configFile, GothamConfig *gothamConfig) {

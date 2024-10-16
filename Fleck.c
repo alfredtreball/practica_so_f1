@@ -1,7 +1,5 @@
+#define _GNU_SOURCE //asprintf OK
 #include "Fleck.h"
-#include "Utils.h"
-
-
 
 void listMedia(char *directory) {
     DIR *dir;
@@ -165,10 +163,10 @@ void processCommand(char *command, char *directory) {
         if (subCmd != NULL) {
             if (strcasecmp(subCmd, "MEDIA") == 0) {
                 printF("Comanda OK:");
-                //listMedia(directory);
+                listMedia(directory);
             } else if (strcasecmp(subCmd, "TEXT") == 0) {
                 printF("Comanda OK:");
-                //listText(directory);
+                listText(directory);
             } else {
                 printF("Comanda KO: tipus de llista desconegut\n");
             }

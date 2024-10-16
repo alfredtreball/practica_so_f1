@@ -1,3 +1,4 @@
+#define _GNU_SOURCE //asprintf OK
 #include "Enigma.h" // Incluye el archivo de encabezado
 
 // Función para leer el archivo de configuración de Enigma

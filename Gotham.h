@@ -1,8 +1,7 @@
 #ifndef GOTHAMCONFIG_H
 #define GOTHAMCONFIG_H
 
-#define _GNU_SOURCE // Asegura que asprintf esté disponible
-
+#include "Utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

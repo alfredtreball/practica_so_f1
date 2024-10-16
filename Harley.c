@@ -1,7 +1,5 @@
+#define _GNU_SOURCE //asprintf OK
 #include "Harley.h" // Incluye el archivo de encabezado
-
-
-
 
 // Función para leer el archivo de configuración de Harley
 void readConfigFile(const char *configFile, HarleyConfig *harleyConfig) {

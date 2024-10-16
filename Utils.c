@@ -1,6 +1,5 @@
 #include "Utils.h"
 
-
 char *readUntil(int fd, char cEnd) {
     int i = 0;
     ssize_t chars_read;
