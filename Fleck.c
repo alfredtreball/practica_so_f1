@@ -5,7 +5,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <ctype.h> // Per a la funció isspace
 #include <strings.h> // Necessari per a la funció strcasecmp
 
 // Definició de l'estructura FleckConfig per emmagatzemar la configuració del sistema Fleck
