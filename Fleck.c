@@ -1,117 +1,22 @@
 #define _GNU_SOURCE //asprintf OK
-#include "Fleck.h"
+#include "Utils.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <ctype.h> // Per a isspace
 
-/*void listMedia(char *directory) {
-    DIR *dir;
-    struct dirent *entry;
-    int count = 0;
+#define printF(x) write(1, x, strlen(x)) // Macro per escriure missatges
 
-    if ((dir = opendir(directory)) == NULL) {
-        printF("Error obrint el directori\n");
-        return;
-    }
+// Estructura de configuració de Fleck
+typedef struct {
+    char *user;
+    char *directory;
+    char *ipGotham;
+    int portGotham;
+} FleckConfig;
 
-    char *output = NULL;  // Inicialitzem sense mida
-    size_t output_len = 0;
-
-    printF("Media files available:\n");
-
-    while ((entry = readdir(dir)) != NULL) {
-        if (endsWith(entry->d_name, ".wav") || endsWith(entry->d_name, ".png") || endsWith(entry->d_name, ".jpg")) {
-            char *entry_str;
-            int entry_len = asprintf(&entry_str, "%d. %s\n", ++count, entry->d_name);  // Generem l'string del fitxer
-
-            if (entry_len == -1) {
-                printF("Error generant el missatge\n");
-                free(output);
-                closedir(dir);
-                return;
-            }
-
-            // Reassignem memòria per al nou missatge
-            output = (char *)realloc(output, output_len + entry_len + 1);
-            if (output == NULL) {
-                printF("Error d'assignació de memòria\n");
-                free(entry_str);
-                closedir(dir);
-                return;
-            }
-
-            // Afegim la nova línia al buffer de sortida
-            memcpy(output + output_len, entry_str, entry_len);
-            output_len += entry_len;
-            output[output_len] = '\0';  // Assegurar-nos que el buffer estigui ben acabat
-
-            free(entry_str);  // Alliberem l'string temporal
-        }
-    }
-
-    if (count == 0) {
-        printF("No media files found\n");
-    } else {
-        printF(output);
-    }
-
-    free(output);  // Alliberar memòria del buffer de sortida
-    closedir(dir);
-}
-
-void listText(char *directory) {
-    DIR *dir;
-    struct dirent *entry;
-    int count = 0;
-
-    if ((dir = opendir(directory)) == NULL) {
-        printF("Error obrint el directori\n");
-        return;
-    }
-
-    char *output = NULL;  // Inicialitzem sense mida
-    size_t output_len = 0;
-
-    printF("Text files available:\n");
-
-    while ((entry = readdir(dir)) != NULL) {
-        if (endsWith(entry->d_name, ".txt")) {
-            char *entry_str;
-            int entry_len = asprintf(&entry_str, "%d. %s\n", ++count, entry->d_name);  // Generem l'string del fitxer
-
-            if (entry_len == -1) {
-                printF("Error generant el missatge\n");
-                free(output);
-                closedir(dir);
-                return;
-            }
-
-            // Reassignem memòria per al nou missatge
-            output = (char *)realloc(output, output_len + entry_len + 1);
-            if (output == NULL) {
-                printF("Error d'assignació de memòria\n");
-                free(entry_str);
-                closedir(dir);
-                return;
-            }
-
-            // Afegim la nova línia al buffer de sortida
-            memcpy(output + output_len, entry_str, entry_len);
-            output_len += entry_len;
-            output[output_len] = '\0';  // Assegurar-nos que el buffer estigui ben acabat
-
-            free(entry_str);  // Alliberem l'string temporal
-        }
-    }
-
-    if (count == 0) {
-        printF("No text files found\n");
-    } else {
-        printF(output);
-    }
-
-    free(output);  // Alliberar memòria del buffer de sortida
-    closedir(dir);
-}
-
-*/
 
 // Función para procesar el archivo de configuración usando open, readUntil y memoria dinámica
 void readConfigFile(const char *configFile, FleckConfig *fleckConfig) {

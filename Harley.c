@@ -1,5 +1,23 @@
 #define _GNU_SOURCE //asprintf OK
-#include "Harley.h" // Incluye el archivo de encabezado
+#include "Utils.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+// Macro para imprimir mensajes
+#define printF(x) write(1, x, strlen(x))
+
+// Definición de la estructura HarleyConfig que contiene la configuración de Harley
+typedef struct {
+    char *ipGotham;
+    int portGotham;
+    char *ipFleck;
+    int portFleck;
+    char *directory;
+    char *workerType;
+} HarleyConfig;
 
 // Función para leer el archivo de configuración de Harley
 void readConfigFile(const char *configFile, HarleyConfig *harleyConfig) {

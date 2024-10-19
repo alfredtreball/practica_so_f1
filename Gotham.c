@@ -1,5 +1,21 @@
 #define _GNU_SOURCE //asprintf OK
-#include "Gotham.h" // Incluye el archivo de encabezado
+#include "Utils.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+// Macro para imprimir mensajes
+#define printF(x) write(1, x, strlen(x))
+
+// Definición de la estructura GothamConfig que contiene la configuración de Gotham
+typedef struct {
+    char *ipFleck;
+    int portFleck;
+    char *ipHarEni;
+    int portHarEni;
+} GothamConfig;
 
 // Función para leer el archivo de configuración de Gotham
 void readConfigFile(const char *configFile, GothamConfig *gothamConfig) {

@@ -1,5 +1,21 @@
 #define _GNU_SOURCE //asprintf OK
-#include "Enigma.h" // Incluye el archivo de encabezado
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+// Macro para imprimir mensajes
+#define printF(x) write(1, x, strlen(x))
+
+// Definición de la estructura EnigmaConfig que contiene la configuración de Enigma
+typedef struct {
+    char *ipGotham;
+    int portGotham;
+    char *ipFleck;
+    int portFleck;
+    char *directory;
+    char *workerType;
+} EnigmaConfig;
 
 // Función para leer el archivo de configuración de Enigma
 void readConfigFile(const char *configFile, EnigmaConfig *enigmaConfig) {
