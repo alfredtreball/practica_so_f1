@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <ctype.h> // Per a isspace
+#include <strings.h> // Necesario para strcasecmp
 
 // Estructura de configuració de Fleck
 typedef struct {
@@ -58,24 +59,24 @@ void processCommand(char *command) {
         return;
     }
 
-    if (strcmp(cmd, "CONNECT") == 0) {
+    if (strcasecmp(cmd, "CONNECT") == 0) {
         printF("Comanda OK\n");
-    } else if (strcmp(cmd, "LOGOUT") == 0) {
+    } else if (strcasecmp(cmd, "LOGOUT") == 0) {
         printF("Comanda OK\n");
-    } else if (strcmp(cmd, "LIST") == 0) {
+    } else if (strcasecmp(cmd, "LIST") == 0) {
         char *subCmd = strtok(NULL, " ");  // Segunda parte del comando
         if (subCmd != NULL) {
-            if (strcmp(subCmd, "MEDIA") == 0) {
-                printF("Comanda OK:\n");
-            } else if (strcmp(subCmd, "TEXT") == 0) {
-                printF("Comanda OK:\n");
+            if (strcasecmp(subCmd, "MEDIA") == 0) {
+                printF("Comanda OK\n");
+            } else if (strcasecmp(subCmd, "TEXT") == 0) {
+                printF("Comanda OK\n");
             } else {
-                printF("Comanda KO: tipo de lista desconocido\n");
+                printF("Comanda KO\n");
             }
         } else {
-            printF("Comanda KO: falta especificar MEDIA o TEXT\n");
+            printF("Comanda KO\n");
         }
-    } else if (strcmp(cmd, "DISTORT") == 0) {
+    } else if (strcasecmp(cmd, "DISTORT") == 0) {
         char *file = strtok(NULL, " ");  // Primer parámetro
         char *factorStr = strtok(NULL, " ");  // Segundo parámetro (factor)
 
@@ -84,17 +85,15 @@ void processCommand(char *command) {
             if (factor > 0) {
                 printF("Distorsión iniciada!\n");
             } else {
-                printF("Comanda KO: factor incorrecto\n");
+                printF("Comanda KO\n");
             }
         } else {
-            printF("Comanda KO: argumentos incorrectos\n");
+            printF("Comanda KO\n");
         }
     } else {
         printF("Comanda KO\n");
-        //printF("ERROR: Please input a valid command.\n");
     }
 }
-
 
 void alliberarMemoria(FleckConfig *fleckConfig){
     if (fleckConfig->user) {
@@ -126,7 +125,7 @@ int main(int argc, char *argv[]) {
     char *command = NULL;
     
     while (1) {
-        printF("$montserrat:> ");
+        printF("$ ");
         
         command = readUntil(STDIN_FILENO, '\n');
         if (command == NULL) {
