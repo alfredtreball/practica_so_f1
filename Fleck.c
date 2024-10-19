@@ -77,16 +77,31 @@ void processCommand(char *command) {
             printF("Comanda KO\n");
         }
     } else if (strcasecmp(cmd, "DISTORT") == 0) {
-        char *file = strtok(NULL, " ");  // Primer parámetro
-        char *factorStr = strtok(NULL, " ");  // Segundo parámetro (factor)
+        char *file = strtok(NULL, " ");  
+        char *factorStr = strtok(NULL, " ");  
+        char *extraParam = strtok(NULL, " ");  // Intentamos leer un tercer parámetro
 
-        if (file != NULL && factorStr != NULL) {
-            int factor = atoi(factorStr);  // Convierte el factor a entero
+        if (file != NULL && factorStr != NULL && extraParam == NULL) {  // Acepta solo 2 parámetros
+            int factor = atoi(factorStr); 
             if (factor > 0) {
-                printF("Distorsión iniciada!\n");
+                printF("Comanda OK\n");
             } else {
                 printF("Comanda KO\n");
             }
+        } else {
+            printF("Comanda KO\n");
+        }
+    } else if (strcasecmp(cmd, "CHECK") == 0) {
+        char *subCmd = strtok(NULL, " ");
+        if (subCmd != NULL && strcasecmp(subCmd, "STATUS") == 0) {
+            printF("Comanda OK\n");
+        } else {
+            printF("Comanda KO\n");
+        }
+    } else if (strcasecmp(cmd, "CLEAR") == 0) {
+        char *subCmd = strtok(NULL, " ");
+        if (subCmd != NULL && strcasecmp(subCmd, "ALL") == 0) {
+            printF("Comanda OK\n");
         } else {
             printF("Comanda KO\n");
         }
