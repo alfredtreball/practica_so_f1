@@ -52,44 +52,44 @@ void readConfigFile(const char *configFile, FleckConfig *fleckConfig) {
     free(portGothamStr);
 }
 
+void processCommand(char *command) {
+    char *cmd = strtok(command, " ");  // Separa la primera palabra del comando
 
+    if (cmd == NULL) {
+        printF("ERROR: Please input a valid command.\n");
+        return;
+    }
 
-void processCommand(char *command /*char *directory*/) {
-    char* context = NULL;
-    char *cmd = separarParaules(command, " ", &context);  // Separa la primera paraula del comandament
-
-    if (strcasecmp(cmd, "CONNECT") == 0) {
-        printF("Comanda OK: CONNECT\n");
-    } else if (strcasecmp(cmd, "LOGOUT") == 0) {
-        printF("Comanda OK: LOGOUT\n");
-    } else if (strcasecmp(cmd, "LIST") == 0) {
-        char *subCmd = separarParaules(NULL, " ", &context);  // Segona part del comandament
+    if (strcmp(cmd, "CONNECT") == 0) {
+        printF("Comanda OK\n");
+    } else if (strcmp(cmd, "LOGOUT") == 0) {
+        printF("Comanda OK\n");
+    } else if (strcmp(cmd, "LIST") == 0) {
+        char *subCmd = strtok(NULL, " ");  // Segunda parte del comando
         if (subCmd != NULL) {
-            if (strcasecmp(subCmd, "MEDIA") == 0) {
+            if (strcmp(subCmd, "MEDIA") == 0) {
                 printF("Comanda OK:");
-                //listMedia(directory);
-            } else if (strcasecmp(subCmd, "TEXT") == 0) {
+            } else if (strcmp(subCmd, "TEXT") == 0) {
                 printF("Comanda OK:");
-                //listText(directory);
             } else {
-                printF("Comanda KO: tipus de llista desconegut\n");
+                printF("Comanda KO: tipo de lista desconocido\n");
             }
         } else {
             printF("Comanda KO: falta especificar MEDIA o TEXT\n");
         }
-    } else if (strcasecmp(cmd, "DISTORT") == 0) {
-        char *file = separarParaules(NULL, " ", &context);  // Primer paràmetre
-        char *factorStr = separarParaules(NULL, " ", &context);  // Segon paràmetre (factor)
+    } else if (strcmp(cmd, "DISTORT") == 0) {
+        char *file = strtok(NULL, " ");  // Primer parámetro
+        char *factorStr = strtok(NULL, " ");  // Segundo parámetro (factor)
 
         if (file != NULL && factorStr != NULL) {
-            int factor = atoi(factorStr);  // Converteix el factor a enter
+            int factor = atoi(factorStr);  // Convierte el factor a entero
             if (factor > 0) {
-                printF("Distorsion started!\n");
+                printF("Distorsión iniciada!\n");
             } else {
-                printF("Comanda KO: factor incorrecte\n");
+                printF("Comanda KO: factor incorrecto\n");
             }
         } else {
-            printF("Comanda KO: arguments incorrectes\n");
+            printF("Comanda KO: argumentos incorrectos\n");
         }
     } else {
         printF("ERROR: Please input a valid command.\n");
@@ -135,9 +135,7 @@ int main(int argc, char *argv[]) {
             break;
         }
 
-        
-        
-        processCommand(command /*fleckConfig->directory*/);
+        processCommand(command);
         free(command);  // Allibera la memòria de la comanda després de cada ús
     }
 

@@ -12,7 +12,6 @@
 
 // Funciones de utilidad general
 char *readUntil(int fd, char cEnd);
-char* separarParaules(char* string, const char* delimiter, char** context);
 int endsWith(char *str, char *suffix);
 char *trim(char *str);
 void removeChar(char *string, char charToRemove);

@@ -30,42 +30,6 @@ char *readUntil(int fd, char cEnd) {
     return buffer;
 }
 
-char* separarParaules(char* string, const char* delimiter, char** context) {
-    char* posicio = NULL;
-
-    if (string != NULL) {
-        posicio = string;
-    } else {
-        if (*context == NULL) {
-            return NULL;
-        }
-        posicio = *context;
-    }
-
-    while (*posicio && strchr(delimiter, *posicio)) {
-        posicio++;
-    }
-
-    if (*posicio == '\0') {
-        *context = NULL;
-        return NULL;
-    }
-
-    char *iniciParaula = posicio;
-
-    while (*posicio && !strchr(delimiter, *posicio)) {
-        posicio++;
-    }
-
-    if (*posicio) {
-        *posicio = '\0';
-        posicio++;
-    }
-
-    *context = posicio;
-    return iniciParaula;
-}
-
 int endsWith(char *str, char *suffix) {
     if (!str || !suffix) return 0;
     size_t lenStr = strlen(str);
