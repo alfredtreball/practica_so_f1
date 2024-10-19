@@ -6,8 +6,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-// Macro para imprimir mensajes
-#define printF(x) write(1, x, strlen(x))
 
 // Definición de la estructura GothamConfig que contiene la configuración de Gotham
 typedef struct {

@@ -6,9 +6,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-// Macro para imprimir mensajes
-#define printF(x) write(1, x, strlen(x))
-
 // Definición de la estructura HarleyConfig que contiene la configuración de Harley
 typedef struct {
     char *ipGotham;

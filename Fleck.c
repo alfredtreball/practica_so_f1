@@ -7,8 +7,6 @@
 #include <fcntl.h>
 #include <ctype.h> // Per a isspace
 
-#define printF(x) write(1, x, strlen(x)) // Macro per escriure missatges
-
 // Estructura de configuració de Fleck
 typedef struct {
     char *user;
@@ -68,9 +66,9 @@ void processCommand(char *command) {
         char *subCmd = strtok(NULL, " ");  // Segunda parte del comando
         if (subCmd != NULL) {
             if (strcmp(subCmd, "MEDIA") == 0) {
-                printF("Comanda OK:");
+                printF("Comanda OK:\n");
             } else if (strcmp(subCmd, "TEXT") == 0) {
-                printF("Comanda OK:");
+                printF("Comanda OK:\n");
             } else {
                 printF("Comanda KO: tipo de lista desconocido\n");
             }
@@ -92,7 +90,8 @@ void processCommand(char *command) {
             printF("Comanda KO: argumentos incorrectos\n");
         }
     } else {
-        printF("ERROR: Please input a valid command.\n");
+        printF("Comanda KO\n");
+        //printF("ERROR: Please input a valid command.\n");
     }
 }
 

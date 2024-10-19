@@ -3,9 +3,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include "Utils.h"
 
-// Macro para imprimir mensajes
-#define printF(x) write(1, x, strlen(x))
 
 // Definición de la estructura EnigmaConfig que contiene la configuración de Enigma
 typedef struct {
