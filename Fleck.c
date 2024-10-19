@@ -42,9 +42,9 @@ void readConfigFile(const char *configFile, FleckConfig *fleckConfig) {
     fleckConfig->portGotham = atoi(portStr); // Converteix el port a enter
     free(portStr); // Allibera la memòria de la cadena temporal
     close(fd); // Tanca el fitxer
-
-    // Mostra la configuració llegida per a verificació
-    printF("User - ");
+    
+    printF("\n\nFile read correctly:");
+    printF("\nUser - ");
     printF(fleckConfig->user);
     printF("\nDirectory - ");
     printF(fleckConfig->directory);
@@ -161,7 +161,7 @@ int main(int argc, char *argv[]) {
     readConfigFile(argv[1], fleckConfig);
     
     while (1) {
-        printF("$ "); // Mostra el prompt
+        printF("\n$ "); // Mostra el prompt
         
         command = readUntil(STDIN_FILENO, '\n'); // Llegeix la línia de comanda
         if (command == NULL) {

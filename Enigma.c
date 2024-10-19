@@ -26,7 +26,7 @@ typedef struct {
 ************************************************/
 void readConfigFile(const char *configFile, EnigmaConfig *enigmaConfig) {
     int fd = open(configFile, O_RDONLY); // Obre el fitxer en mode només lectura
-    
+
     if (fd == -1) {
         printF("Error obrint el fitxer de configuració\n"); // Missatge d'error si no es pot obrir
         exit(1); // Finalitza el programa en cas d'error
@@ -65,10 +65,10 @@ void readConfigFile(const char *configFile, EnigmaConfig *enigmaConfig) {
     printF(portFleckStr);
     free(portFleckStr); // Allibera la memòria de la cadena temporal
 
-    printF("\nDirectori Enigma - ");
+    printF("\nDirectory - ");
     printF(enigmaConfig->directory);
 
-    printF("\nTipus de Treballador - ");
+    printF("\nWorker Type - ");
     printF(enigmaConfig->workerType);
     printF("\n");
 }
