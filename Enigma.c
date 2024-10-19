@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+
 #include "Utils.h" // Inclou les funcions utilitàries necessàries
 
 // Definició de la estructura EnigmaConfig per emmagatzemar la configuració del sistema Enigma
@@ -25,6 +26,7 @@ typedef struct {
 ************************************************/
 void readConfigFile(const char *configFile, EnigmaConfig *enigmaConfig) {
     int fd = open(configFile, O_RDONLY); // Obre el fitxer en mode només lectura
+    
     if (fd == -1) {
         printF("Error obrint el fitxer de configuració\n"); // Missatge d'error si no es pot obrir
         exit(1); // Finalitza el programa en cas d'error

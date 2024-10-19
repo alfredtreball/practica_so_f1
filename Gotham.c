@@ -1,10 +1,12 @@
 #define _GNU_SOURCE // Necessari per a que 'asprintf' funcioni correctament
-#include "Utils.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+
+#include "Utils.h"
 
 // Definició de l'estructura GothamConfig per emmagatzemar la configuració del sistema Gotham
 typedef struct {
@@ -24,6 +26,7 @@ typedef struct {
 ************************************************/
 void readConfigFile(const char *configFile, GothamConfig *gothamConfig) {
     int fd = open(configFile, O_RDONLY); // Obre el fitxer en mode només lectura
+    
     if (fd == -1) {
         printF("Error obrint el fitxer de configuració\n"); // Missatge d'error si no es pot obrir
         exit(1); // Finalitza el programa en cas d'error

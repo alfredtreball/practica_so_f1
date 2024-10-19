@@ -1,5 +1,5 @@
-#ifndef UTILS_H
-#define UTILS_H
+#ifndef _UTILS_H
+#define _UTILS_H
 
 #include <unistd.h>  // Per a la funció write
 #include <stdlib.h>  // Per a malloc, realloc, free

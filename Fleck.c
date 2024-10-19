@@ -1,11 +1,13 @@
 #define _GNU_SOURCE // Necessari per a que 'asprintf' funcioni correctament
-#include "Utils.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <strings.h> // Necessari per a la funció strcasecmp
+
+#include "Utils.h"
 
 // Definició de l'estructura FleckConfig per emmagatzemar la configuració del sistema Fleck
 typedef struct {
@@ -147,6 +149,8 @@ void alliberarMemoria(FleckConfig *fleckConfig){
 int main(int argc, char *argv[]) {
     // Crea la variable local per a la configuració de Fleck
     FleckConfig *fleckConfig = (FleckConfig *)malloc(sizeof(FleckConfig));
+    // Lògica de línia de comandes amb memòria dinàmica
+    char *command = NULL;
     
     if (argc != 2) {
         printF("Ús: ./fleck <fitxer de configuració>\n"); // Comprova que s'ha passat el fitxer de configuració com a argument
@@ -155,9 +159,6 @@ int main(int argc, char *argv[]) {
 
     // Llegeix el fitxer de configuració passant l'estructura fleckConfig com a argument
     readConfigFile(argv[1], fleckConfig);
-
-    // Lògica de línia de comandes amb memòria dinàmica
-    char *command = NULL;
     
     while (1) {
         printF("$ "); // Mostra el prompt
