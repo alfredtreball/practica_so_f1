@@ -31,60 +31,61 @@ typedef struct {
     int portGotham;   // Port del servidor Gotham
 } FleckConfig;
 
-// Funció per llistar els fitxers de text en el directori especificat
+// Funció per llistar els fitxers de text (.txt) en el directori especificat
 /***********************************************
-* @Finalitat: Llista els fitxers de tipus .txt en el directori especificat 
-*             utilitzant els comandaments del sistema.
+* @Finalitat: Llista els fitxers amb l'extensió .txt en el directori especificat 
+*             utilitzant el comandament find del sistema.
 * @Paràmetres:
 *   in: directory = el directori on buscar els fitxers.
 * @Retorn: ----
 ************************************************/
 void listText(const char *directory) {
-    pid_t pid = fork();
+    pid_t pid = fork(); // Crea un nou procés amb fork()
 
-    if (pid == 0) { // Proceso hijo
-        // Prepara los argumentos para execv
-        char *args[] = {"/usr/bin/find", (char *)directory, "-type", "f", "-name", "*.txt", "-exec", "basename", "{}", ";", NULL};
-        execv(args[0], args);
-        // Si execv falla
-        printF("Error ejecutando find\n");
-        exit(1);
+    if (pid == 0) { // Procés fill
+        // Prepara els arguments per executar el comandament find
+        char *args[] = {"/usr/bin/find", (char *)directory, "-type", "f", "-name", "*.txt", 
+                        "-exec", "basename", "{}", ";", NULL};
+        execv(args[0], args); // Executa el comandament especificat en args
+        // Si execv falla, mostra un missatge d'error
+        printF("Error executant find\n");
+        exit(1); // Finalitza el procés fill amb codi d'error
     } else if (pid > 0) {
-        // Proceso padre espera a que el hijo termine
-        wait(NULL);
+        // Procés pare, espera que el fill acabi
+        wait(NULL); // Espera la finalització del procés fill
     } else {
-        // Error en fork
+        // Error en fork, no es pot crear el procés fill
         printF("Error en fork\n");
     }
 }
 
-// Funció per llistar els fitxers de mitjans en el directori especificat
+// Funció per llistar els fitxers de tipus mitjà (wav, jpg, png) en el directori especificat
 /***********************************************
-* @Finalitat: Llista els fitxers de tipus .mp3 o .mp4 en el directori especificat 
-*             utilitzant els comandaments del sistema.
+* @Finalitat: Llista els fitxers amb extensions .wav, .jpg, o .png en el directori especificat 
+*             utilitzant un script de bash per a executar el comandament find.
 * @Paràmetres:
 *   in: directory = el directori on buscar els fitxers.
 * @Retorn: ----
 ************************************************/
 void listMedia(const char *directory) {
-    pid_t pid = fork();
+    pid_t pid = fork(); // Crea un nou procés amb fork()
 
-    if (pid == 0) { // Proceso hijo
-        // Prepara el comando a ejecutar
+    if (pid == 0) { // Proceso fill
+        // Prepara els arguments per executar el comandament bash
         char *args[] = {
-            "/bin/bash", "-c",
-            "find \"$1\" -type f \\( -name '*.wav' -o -name '*.jpg' -o -name '*.png' \\) -exec basename {} \\;",
-            "bash", (char *)directory, NULL
+            "/bin/bash", "-c", // Executa bash amb l'opció -c per passar un script com a cadena
+            "find \"$1\" -type f \\( -name '*.wav' -o -name '*.jpg' -o -name '*.png' \\) -exec basename {} \\;", // Comandament find per buscar fitxers amb extensions especificades
+            "bash", (char *)directory, NULL // Arguments addicionals per bash
         };
-        execv(args[0], args);
-        // Si execv falla
-        printF("Error ejecutando bash\n");
-        exit(1);
-    } else if (pid > 0) {
-        // Proceso padre espera a que el hijo termine
-        wait(NULL);
+        execv(args[0], args); // Executa el comandament especificat en args
+        // Si execv falla, mostra un missatge d'error
+        printF("Error executant bash\n");
+        exit(1); // Finalitza el procés fill amb codi d'error
+    } else if (pid > 0) { 
+        // Proceso pare, espera que el fill acabi
+        wait(NULL); // Espera la finalització del procés fill
     } else {
-        // Error en fork
+        // Error en fork, no es pot crear el procés fill
         printF("Error en fork\n");
     }
 }
