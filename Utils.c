@@ -1,3 +1,17 @@
+/***********************************************
+* @Fitxer: Utils.c
+* @Autors: Pau Olea Reyes (pau.olea), Alfred Chávez Fernández (alfred.chavez)
+* @Estudis: Enginyeria Electrònica de Telecomunicacions
+* @Universitat: Universitat Ramon Llull - La Salle
+* @Assignatura: Sistemes Operatius
+* @Curs: 2024-2025
+* 
+* @Descripció: Aquest fitxer conté funcions utilitàries generals per a la manipulació
+* de cadenes de caràcters i per a la gestió de fitxers. Les funcions inclouen la lectura
+* de dades d'un fitxer fins a un caràcter específic, la verificació de sufixos en cadenes, 
+* l'eliminació d'espais en blanc a l'inici i al final de les cadenes, i l'eliminació 
+* de caràcters específics dins de les cadenes.
+************************************************/
 #include "Utils.h"
 
 // Funció per llegir descripcions del fitxer fins a trobar un caràcter específic o el final del fitxer

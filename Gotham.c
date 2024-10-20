@@ -1,3 +1,17 @@
+/***********************************************
+* @Fitxer: Gotham.c
+* @Autors: Pau Olea Reyes (pau.olea), Alfred Chávez Fernández (alfred.chavez)
+* @Estudis: Enginyeria Electrònica de Telecomunicacions
+* @Universitat: Universitat Ramon Llull - La Salle
+* @Assignatura: Sistemes Operatius
+* @Curs: 2024-2025
+* 
+* @Descripció: Aquest fitxer implementa la gestió de configuració per al sistema 
+* Gotham. Inclou funcions per a llegir la configuració des d'un fitxer, 
+* emmagatzemar la informació en una estructura de dades i alliberar la memòria 
+* dinàmica associada. La configuració inclou informació de les connexions 
+* amb els servidors Fleck i Harley Enigma.
+************************************************/
 #define _GNU_SOURCE // Necessari per a que 'asprintf' funcioni correctament
 
 #include <stdio.h>

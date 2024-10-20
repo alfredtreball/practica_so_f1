@@ -1,3 +1,19 @@
+/***********************************************
+* @Fitxer: Utils.h
+* @Autors: Pau Olea Reyes (pau.olea), Alfred Chávez Fernández (alfred.chavez)
+* @Estudis: Enginyeria Electrònica de Telecomunicacions
+* @Universitat: Universitat Ramon Llull - La Salle
+* @Assignatura: Sistemes Operatius
+* @Curs: 2024-2025
+* 
+* @Descripció: Aquest fitxer d'encapçalament defineix funcions utilitàries per al projecte,
+* incloent-hi funcions per a la manipulació de cadenes i la gestió de fitxers. Les utilitats
+* inclouen la lectura des d'un fitxer fins a un caràcter específic, la verificació de si una
+* cadena acaba amb un sufix determinat, la funció per eliminar espais en blanc d'una cadena, 
+* i l'eliminació de caràcters específics dins de les cadenes. També s'inclou una macro per a 
+* la sortida de text a la consola.
+************************************************/
+
 #ifndef _UTILS_H
 #define _UTILS_H
 

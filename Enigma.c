@@ -1,3 +1,16 @@
+/***********************************************
+* @Fitxer: Enigma.c
+* @Autors: Pau Olea Reyes (pau.olea), Alfred Chávez Fernández (alfred.chavez)
+* @Estudis: Enginyeria Electrònica de Telecomunicacions
+* @Universitat: Universitat Ramon Llull - La Salle
+* @Assignatura: Sistemes Operatius
+* @Curs: 2024-2025
+* 
+* @Descripció: Aquest fitxer implementa la gestió de configuració del sistema Enigma. 
+* Conté funcions per a llegir la configuració d'un fitxer i carregar-la en l'estructura 
+* EnigmaConfig, així com per alliberar la memòria associada. La configuració inclou 
+* informació sobre servidors i el tipus de treballador.
+************************************************/
 #define _GNU_SOURCE // Necessari per a que 'asprintf' funcioni correctament
 #include <stdlib.h>
 #include <string.h>

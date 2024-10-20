@@ -1,3 +1,18 @@
+/***********************************************
+* @Fitxer: Harley.c
+* @Autors: Pau Olea Reyes (pau.olea), Alfred Chávez Fernández (alfred.chavez)
+* @Estudis: Enginyeria Electrònica de Telecomunicacions
+* @Universitat: Universitat Ramon Llull - La Salle
+* @Assignatura: Sistemes Operatius
+* @Curs: 2024-2025
+* 
+* @Descripció: Aquest fitxer implementa les funcions per a la gestió de la 
+* configuració del sistema Harley. Inclou funcions per a llegir la configuració 
+* des d'un fitxer, emmagatzemar la informació en una estructura de dades, i 
+* alliberar la memòria dinàmica associada. La configuració inclou informació 
+* sobre les connexions amb els servidors Gotham i Fleck, així com informació 
+* del directori de treball i el tipus de treballador.
+************************************************/
 #define _GNU_SOURCE // Necessari per a que 'asprintf' funcioni correctament
 
 #include <stdio.h>

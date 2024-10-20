@@ -1,3 +1,17 @@
+/***********************************************
+* @Fitxer: Fleck.c
+* @Autors: Pau Olea Reyes (pau.olea), Alfred Chávez Fernández (alfred.chavez)
+* @Estudis: Enginyeria Electrònica de Telecomunicacions
+* @Universitat: Universitat Ramon Llull - La Salle
+* @Assignatura: Sistemes Operatius
+* @Curs: 2024-2025
+* 
+* @Descripció: Aquest fitxer implementa la gestió de configuració i processament 
+* de comandes per al sistema Fleck. Conté funcions per a llegir la configuració 
+* d'un fitxer, processar les comandes de l'usuari, i alliberar la memòria 
+* associada. La configuració inclou informació de l'usuari, el directori, 
+* i la connexió al servidor Gotham.
+************************************************/
 #define _GNU_SOURCE // Necessari per a que 'asprintf' funcioni correctament
 
 #include <stdio.h>
