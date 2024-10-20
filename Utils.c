@@ -111,3 +111,16 @@ void removeChar(char *string, char charToRemove) {
     }
     *dst = '\0'; // Afegeix el caràcter de terminació de cadena
 }
+
+
+char *intToStr(int num) {
+    // Calcula la longitud necessària per emmagatzemar l'enter com a cadena
+    int length = snprintf(NULL, 0, "%d", num);
+    char *str = (char *)malloc(length + 1); // Reserva memòria per a la cadena
+    if (str == NULL) {
+        printF("Error reservant memòria per a intToStr\n");
+        exit(1);
+    }
+    snprintf(str, length + 1, "%d", num); // Converteix l'enter a cadena
+    return str;
+}

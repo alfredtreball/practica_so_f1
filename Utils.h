@@ -49,4 +49,6 @@ char *trim(char *str);
 // Elimina totes les aparicions d'un caràcter específic en una cadena
 void removeChar(char *string, char charToRemove);
 
+char *intToStr(int num) ;
+
 #endif // UTILS_H

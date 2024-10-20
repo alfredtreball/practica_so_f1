@@ -40,21 +40,63 @@ typedef struct {
 * @Retorn: ----
 ************************************************/
 void listText(const char *directory) {
-    pid_t pid = fork(); // Crea un nou procés amb fork()
+    pid_t pid = fork();
 
     if (pid == 0) { // Procés fill
-        // Prepara els arguments per executar el comandament find
-        char *args[] = {"/usr/bin/find", (char *)directory, "-type", "f", "-name", "*.txt", 
-                        "-exec", "basename", "{}", ";", NULL};
-        execv(args[0], args); // Executa el comandament especificat en args
-        // Si execv falla, mostra un missatge d'error
+        int tempFd = open("/tmp/text_files.txt", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        if (tempFd == -1) {
+            printF("Error obrint el fitxer temporal\n");
+            exit(1);
+        }
+        dup2(tempFd, STDOUT_FILENO); // Redirigeix la sortida estàndard al fitxer temporal
+        close(tempFd);
+
+        // Executa el comandament find per buscar fitxers de text
+        char *args[] = {"/usr/bin/find", (char *)directory, "-type", "f", "-name", "*.txt", "-exec", "basename", "{}", ";", NULL};
+        execv(args[0], args);
+
+        // Si execv falla
         printF("Error executant find\n");
-        exit(1); // Finalitza el procés fill amb codi d'error
-    } else if (pid > 0) {
-        // Procés pare, espera que el fill acabi
-        wait(NULL); // Espera la finalització del procés fill
+        exit(1);
+    } else if (pid > 0) { // Procés pare
+        wait(NULL);
+
+        int tempFd = open("/tmp/text_files.txt", O_RDONLY);
+        if (tempFd == -1) {
+            printF("Error obrint el fitxer temporal\n");
+            return;
+        }
+
+        int count = 0;
+        char *line;
+        // Llegeix línies del fitxer temporal
+        while ((line = readUntil(tempFd, '\n')) != NULL) {
+            count++;
+            free(line);
+        }
+
+        // Mostra el nombre de fitxers trobats
+        char *countStr = intToStr(count);
+        printF("There are ");
+        printF(countStr);
+        printF(" text files available:\n");
+        free(countStr);
+
+        lseek(tempFd, 0, SEEK_SET); // Torna al començament del fitxer temporal
+
+        int index = 1;
+        while ((line = readUntil(tempFd, '\n')) != NULL) {
+            char *indexStr = intToStr(index++);
+            printF(indexStr);
+            printF(". ");
+            printF(line);
+            printF("\n");
+            free(indexStr);
+            free(line);
+        }
+
+        close(tempFd);
     } else {
-        // Error en fork, no es pot crear el procés fill
         printF("Error en fork\n");
     }
 }
@@ -67,25 +109,70 @@ void listText(const char *directory) {
 *   in: directory = el directori on buscar els fitxers.
 * @Retorn: ----
 ************************************************/
-void listMedia(const char *directory) {
-    pid_t pid = fork(); // Crea un nou procés amb fork()
 
-    if (pid == 0) { // Proceso fill
-        // Prepara els arguments per executar el comandament bash
+
+void listMedia(const char *directory) {
+    pid_t pid = fork();
+
+    if (pid == 0) { // Procés fill
+        int tempFd = open("/tmp/media_files.txt", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        if (tempFd == -1) {
+            printF("Error obrint el fitxer temporal\n");
+            exit(1);
+        }
+        dup2(tempFd, STDOUT_FILENO); // Redirigeix la sortida estàndard al fitxer temporal
+        close(tempFd);
+
+        // Executa el comandament find per buscar fitxers de mitjans
         char *args[] = {
             "/bin/bash", "-c", // Executa bash amb l'opció -c per passar un script com a cadena
             "find \"$1\" -type f \\( -name '*.wav' -o -name '*.jpg' -o -name '*.png' \\) -exec basename {} \\;", // Comandament find per buscar fitxers amb extensions especificades
             "bash", (char *)directory, NULL // Arguments addicionals per bash
         };
-        execv(args[0], args); // Executa el comandament especificat en args
-        // Si execv falla, mostra un missatge d'error
-        printF("Error executant bash\n");
-        exit(1); // Finalitza el procés fill amb codi d'error
-    } else if (pid > 0) { 
-        // Proceso pare, espera que el fill acabi
-        wait(NULL); // Espera la finalització del procés fill
+        execv(args[0], args);
+
+        // Si execv falla
+        printF("Error executant find\n");
+        exit(1);
+    } else if (pid > 0) { // Procés pare
+        wait(NULL);
+
+        int tempFd = open("/tmp/media_files.txt", O_RDONLY);
+        if (tempFd == -1) {
+            printF("Error obrint el fitxer temporal\n");
+            return;
+        }
+
+        int count = 0;
+        char *line;
+        // Llegeix línies del fitxer temporal
+        while ((line = readUntil(tempFd, '\n')) != NULL) {
+            count++;
+            free(line);
+        }
+
+        // Mostra el nombre de fitxers trobats
+        char *countStr = intToStr(count);
+        printF("There are ");
+        printF(countStr);
+        printF(" media files available:\n");
+        free(countStr);
+
+        lseek(tempFd, 0, SEEK_SET); // Torna al començament del fitxer temporal
+
+        int index = 1;
+        while ((line = readUntil(tempFd, '\n')) != NULL) {
+            char *indexStr = intToStr(index++);
+            printF(indexStr);
+            printF(". ");
+            printF(line);
+            printF("\n");
+            free(indexStr);
+            free(line);
+        }
+
+        close(tempFd);
     } else {
-        // Error en fork, no es pot crear el procés fill
         printF("Error en fork\n");
     }
 }
