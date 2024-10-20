@@ -20,7 +20,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <strings.h> // Necessari per a la funció strcasecmp
-
+#include <sys/wait.h> // Necessari per a wait
 #include "Utils.h"
 
 // Definició de l'estructura FleckConfig per emmagatzemar la configuració del sistema Fleck
@@ -30,6 +30,65 @@ typedef struct {
     char *ipGotham;   // Adreça IP del servidor Gotham
     int portGotham;   // Port del servidor Gotham
 } FleckConfig;
+
+// Funció per llistar els fitxers de text en el directori especificat
+/***********************************************
+* @Finalitat: Llista els fitxers de tipus .txt en el directori especificat 
+*             utilitzant els comandaments del sistema.
+* @Paràmetres:
+*   in: directory = el directori on buscar els fitxers.
+* @Retorn: ----
+************************************************/
+void listText(const char *directory) {
+    pid_t pid = fork();
+
+    if (pid == 0) { // Proceso hijo
+        // Prepara los argumentos para execv
+        char *args[] = {"/usr/bin/find", (char *)directory, "-type", "f", "-name", "*.txt", "-exec", "basename", "{}", ";", NULL};
+        execv(args[0], args);
+        // Si execv falla
+        printF("Error ejecutando find\n");
+        exit(1);
+    } else if (pid > 0) {
+        // Proceso padre espera a que el hijo termine
+        wait(NULL);
+    } else {
+        // Error en fork
+        printF("Error en fork\n");
+    }
+}
+
+// Funció per llistar els fitxers de mitjans en el directori especificat
+/***********************************************
+* @Finalitat: Llista els fitxers de tipus .mp3 o .mp4 en el directori especificat 
+*             utilitzant els comandaments del sistema.
+* @Paràmetres:
+*   in: directory = el directori on buscar els fitxers.
+* @Retorn: ----
+************************************************/
+void listMedia(const char *directory) {
+    pid_t pid = fork();
+
+    if (pid == 0) { // Proceso hijo
+        // Prepara el comando a ejecutar
+        char *args[] = {
+            "/bin/bash", "-c",
+            "find \"$1\" -type f \\( -name '*.wav' -o -name '*.jpg' -o -name '*.png' \\) -exec basename {} \\;",
+            "bash", (char *)directory, NULL
+        };
+        execv(args[0], args);
+        // Si execv falla
+        printF("Error ejecutando bash\n");
+        exit(1);
+    } else if (pid > 0) {
+        // Proceso padre espera a que el hijo termine
+        wait(NULL);
+    } else {
+        // Error en fork
+        printF("Error en fork\n");
+    }
+}
+
 
 // Funció per llegir el fitxer de configuració i carregar la informació a la estructura FleckConfig
 /***********************************************
@@ -83,7 +142,7 @@ void readConfigFile(const char *configFile, FleckConfig *fleckConfig) {
 *   in: command = cadena de text amb la comanda a processar.
 * @Retorn: ----
 ************************************************/
-void processCommand(char *command) {
+void processCommand(char *command, FleckConfig *fleckConfig) {
     char *cmd = strtok(command, " "); // Separa la primera paraula del comandament
 
     if (cmd == NULL) {
@@ -100,9 +159,11 @@ void processCommand(char *command) {
         char *subCmd = strtok(NULL, " "); // Llegeix la segona part de la comanda
         if (subCmd != NULL) {
             if (strcasecmp(subCmd, "MEDIA") == 0) {
-                printF("Comanda OK\n");
+                //printF("Comanda OK\n");
+                listMedia(fleckConfig->directory);
             } else if (strcasecmp(subCmd, "TEXT") == 0) {
-                printF("Comanda OK\n");
+                //printF("Comanda OK\n");
+                listText(fleckConfig->directory);
             } else {
                 printF("Comanda KO\n"); // Comanda desconeguda
             }
@@ -187,7 +248,7 @@ int main(int argc, char *argv[]) {
             break; // Finalitza el bucle si hi ha un error
         }
 
-        processCommand(command); // Processa la comanda llegida
+        processCommand(command, fleckConfig); // Processa la comanda llegida
         free(command); // Allibera la memòria de la comanda després de cada ús
     }
 
