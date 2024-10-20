@@ -43,7 +43,7 @@ void listText(const char *directory) {
     pid_t pid = fork();
 
     if (pid == 0) { // Procés fill
-        int tempFd = open("/tmp/text_files.txt", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        int tempFd = open("/tmp/text_files.txt", O_WRONLY | O_CREAT | O_TRUNC, 0777);
         if (tempFd == -1) {
             printF("Error obrint el fitxer temporal\n");
             exit(1);
@@ -115,7 +115,7 @@ void listMedia(const char *directory) {
     pid_t pid = fork();
 
     if (pid == 0) { // Procés fill
-        int tempFd = open("/tmp/media_files.txt", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        int tempFd = open("/tmp/media_files.txt", O_WRONLY | O_CREAT | O_TRUNC, 0777);
         if (tempFd == -1) {
             printF("Error obrint el fitxer temporal\n");
             exit(1);
