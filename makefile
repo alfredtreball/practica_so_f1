@@ -1,3 +1,18 @@
+##################################################
+# @Fitxer: makefile
+# @Autors: Pau Olea Reyes (pau.olea), Alfred Chávez Fernández (alfred.chavez)
+# @Estudis: Enginyeria Electrònica de Telecomunicacions
+# @Universitat: Universitat Ramon Llull - La Salle
+# @Assignatura: Sistemes Operatius
+# @Curs: 2024-2025
+# 
+# @Descripció: Aquest makefile defineix les regles per a la compilació
+# dels diferents executables del projecte, incloent-hi Fleck, Harley,
+# Enigma i Gotham, així com les dependències comunes (Utils.c). També 
+# proporciona un objectiu per a la neteja dels fitxers generats durant
+# el procés de compilació.
+##################################################
+
 # Variables
 CC = gcc
 CFLAGS = -Wall -Wextra
