@@ -42,13 +42,10 @@ void readConfigFile(const char *configFile, FleckConfig *fleckConfig) {
     fleckConfig->portGotham = atoi(portStr); // Converteix el port a enter
     free(portStr); // Allibera la memòria de la cadena temporal
     close(fd); // Tanca el fitxer
-
-
-    // Crear un buffer temporal para almacenar el mensaje
-    fleckConfig->user = trim(fleckConfig->user);
+    
+    fleckConfig->user = trim(fleckConfig->user); // Crear un buffer temporal per emmagatzemar el missatge
     printF("\n");
     printF(fleckConfig->user);
-    //printF("\nTinc caca ");
     printF(" user initialized\n\n");
     printF("File read correctly:");
     printF("\nUser - ");
