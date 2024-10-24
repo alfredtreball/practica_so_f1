@@ -55,12 +55,18 @@ void listText(const char *directory) {
             printF("Error obrint el fitxer temporal\n");
             exit(1);
         }
-        dup2(tempFd, STDOUT_FILENO); // Redirigeix la sortida estàndard al fitxer temporal
+
+        dup2(tempFd, STDOUT_FILENO); //Qualsevol cosa que s'escriviria a la terminal, s'escriu a l'arxiu temporal
         close(tempFd);
 
-        // Executa el comandament find per buscar fitxers de text
+        /** Executa el comandament find per buscar fitxers de text:
+         * -type, f per buscar arxius que no siguin directoris
+         * -name, *.txt per buscar arxius amb extensió .txt
+         * basename per mostrar només el nom de l'arxiu sense el directori complet
+         * NULL acaba la llista d'arguments
+         * */ 
         char *args[] = {"/usr/bin/find", (char *)directory, "-type", "f", "-name", "*.txt", "-exec", "basename", "{}", ";", NULL};
-        execv(args[0], args);
+        execv(args[0], args); //Reemplacem els procés actual per un altre executant un nou programa
 
         // Si execv falla
         printF("Error executant find\n");
@@ -89,7 +95,7 @@ void listText(const char *directory) {
         printF(" text files available:\n");
         free(countStr);
 
-        lseek(tempFd, 0, SEEK_SET); // Torna al començament del fitxer temporal
+        lseek(tempFd, 0, SEEK_SET); // Torna al començament del fitxer temporal per tornar a llegir i poder mostrar un per un
 
         int index = 1;
         while ((line = readUntil(tempFd, '\n')) != NULL) {
@@ -116,8 +122,6 @@ void listText(const char *directory) {
 *   in: directory = el directori on buscar els fitxers.
 * @Retorn: ----
 ************************************************/
-
-
 void listMedia(const char *directory) {
     pid_t pid = fork();
 
