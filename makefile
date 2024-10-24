@@ -8,8 +8,8 @@
 # 
 # @Descripció: Aquest makefile defineix les regles per a la compilació
 # dels diferents executables del projecte, incloent-hi Fleck, Harley,
-# Enigma i Gotham, així com les dependències comunes (Utils.c). També 
-# proporciona un objectiu per a la neteja dels fitxers generats durant
+# Enigma i Gotham, així com les dependències comunes (FileReader.c, StringUtils.c, etc.).
+# També proporciona un objectiu per a la neteja dels fitxers generats durant
 # el procés de compilació.
 ##################################################
 
@@ -21,20 +21,20 @@ CFLAGS = -Wall -Wextra
 all: Fleck.exe Harley.exe Enigma.exe Gotham.exe
 
 # Compilació de Fleck
-Fleck.exe: Fleck.c FileReader.c StringUtils.c DataConversion.c
-	$(CC) $(CFLAGS) Fleck.c  FileReader.c StringUtils.c DataConversion.c -o Fleck.exe
+Fleck.exe: Fleck.c FileReader.c StringUtils.c DataConversion.c Networking.c
+	$(CC) $(CFLAGS) Fleck.c FileReader.c StringUtils.c DataConversion.c Networking.c -o Fleck.exe
 
 # Compilació de Harley
-Harley.exe: Harley.c FileReader.c
-	$(CC) $(CFLAGS) Harley.c FileReader.c StringUtils.c -o Harley.exe
+Harley.exe: Harley.c FileReader.c StringUtils.c DataConversion.c Networking.c
+	$(CC) $(CFLAGS) Harley.c FileReader.c StringUtils.c DataConversion.c Networking.c -o Harley.exe
 
 # Compilació de Enigma
-Enigma.exe: Enigma.c FileReader.c
-	$(CC) $(CFLAGS) Enigma.c FileReader.c StringUtils.c -o Enigma.exe
+Enigma.exe: Enigma.c FileReader.c StringUtils.c DataConversion.c Networking.c
+	$(CC) $(CFLAGS) Enigma.c FileReader.c StringUtils.c DataConversion.c Networking.c -o Enigma.exe
 
 # Compilació de Gotham
-Gotham.exe: Gotham.c FileReader.c
-	$(CC) $(CFLAGS) Gotham.c FileReader.c StringUtils.c -o Gotham.exe
+Gotham.exe: Gotham.c FileReader.c StringUtils.c DataConversion.c Networking.c
+	$(CC) $(CFLAGS) Gotham.c FileReader.c StringUtils.c DataConversion.c Networking.c -o Gotham.exe
 
 # Neteja els fitxers generats
 clean:
