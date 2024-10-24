@@ -22,7 +22,10 @@
 #include <strings.h> // Necessari per a la funció strcasecmp
 #include <sys/wait.h> // Necessari per a wait
 #include <signal.h>
-#include "Utils.h"
+
+#include "FileReader.h"
+#include "StringUtils.h"
+#include "DataConversion.h"
 
 // Definició de l'estructura FleckConfig per emmagatzemar la configuració del sistema Fleck
 typedef struct {
@@ -324,10 +327,11 @@ void alliberarMemoria(FleckConfig *fleckConfig){
 * @Retorn: ----
 ************************************************/
 void signalHandler(int sig) {
-    (void)sig;
-    if (globalFleckConfig != NULL) {
-        printF("\n\nAlliberació de memòria OK\n");
-        alliberarMemoria(globalFleckConfig);
+    if(sig == SIGINT){
+        if (globalFleckConfig != NULL) {
+            printF("\n\nAlliberació de memòria OK\n");
+            alliberarMemoria(globalFleckConfig);
+        }
     }
     exit(0); // Surt del programa correctament
 }

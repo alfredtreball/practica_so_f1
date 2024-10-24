@@ -12,12 +12,14 @@
 * informació sobre servidors i el tipus de treballador.
 ************************************************/
 #define _GNU_SOURCE // Necessari per a que 'asprintf' funcioni correctament
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "Utils.h" // Inclou les funcions utilitàries necessàries
+#include "FileReader.h"
+#include "StringUtils.h"
 
 // Definició de la estructura EnigmaConfig per emmagatzemar la configuració del sistema Enigma
 typedef struct {

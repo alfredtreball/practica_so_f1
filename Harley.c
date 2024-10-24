@@ -21,7 +21,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "Utils.h"
+#include "FileReader.h"
+#include "StringUtils.h"
 
 // Definició de l'estructura HarleyConfig per emmagatzemar la configuració del sistema Harley
 typedef struct {

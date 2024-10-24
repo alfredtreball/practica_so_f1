@@ -20,7 +20,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "Utils.h"
+#include "FileReader.h"
+#include "StringUtils.h"
 
 // Definició de l'estructura GothamConfig per emmagatzemar la configuració del sistema Gotham
 typedef struct {
