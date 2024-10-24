@@ -21,6 +21,7 @@
 #include <fcntl.h>
 #include <strings.h> // Necessari per a la funció strcasecmp
 #include <sys/wait.h> // Necessari per a wait
+#include <signal.h>
 #include "Utils.h"
 
 // Definició de l'estructura FleckConfig per emmagatzemar la configuració del sistema Fleck
@@ -30,6 +31,9 @@ typedef struct {
     char *ipGotham;   // Adreça IP del servidor Gotham
     int portGotham;   // Port del servidor Gotham
 } FleckConfig;
+
+//Variable global per controlar signal
+FleckConfig *globalFleckConfig = NULL;
 
 // Funció per llistar els fitxers de text (.txt) en el directori especificat
 /***********************************************
@@ -312,10 +316,31 @@ void alliberarMemoria(FleckConfig *fleckConfig){
     free(fleckConfig); // Finalment, allibera la memòria de l'estructura principal
 }
 
+// Funció manejadora per a la senyal SIGINT (Control-C)
+/***********************************************
+* @Finalitat: Manejador de la senyal SIGINT (Control-C) per a alliberar la memòria abans de sortir.
+* @Paràmetres:
+*   in: sig = el número de senyal (no utilitzat en aquesta funció).
+* @Retorn: ----
+************************************************/
+void signalHandler(int sig) {
+    (void)sig;
+    if (globalFleckConfig != NULL) {
+        printF("\n\nAlliberació de memòria OK\n");
+        alliberarMemoria(globalFleckConfig);
+    }
+    exit(0); // Surt del programa correctament
+}
+
 // Funció principal
 int main(int argc, char *argv[]) {
     // Crea la variable local per a la configuració de Fleck
     FleckConfig *fleckConfig = (FleckConfig *)malloc(sizeof(FleckConfig));
+
+    globalFleckConfig = fleckConfig;
+
+    signal(SIGINT, signalHandler);
+
     // Lògica de línia de comandes amb memòria dinàmica
     char *command = NULL;
     
