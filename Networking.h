@@ -10,7 +10,7 @@
 
 // Funcions per a la gestió de connexions
 int connect_to_server(const char *ip, int port);
-int start_server(int port);
+int startServer(const char *ip, int port);
 int accept_connection(int server_fd);
 
 // Funcions per a l'enviament i recepció de trames

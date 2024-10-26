@@ -46,31 +46,40 @@ int connect_to_server(const char *ip, int port) {
 }
 
 // Crea un socket servidor per escoltar connexions
-int start_server(int port) {
+int startServer(const char *ip, int port) {
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
-        perror("Error creant el socket del servidor");
+        perror("Error creando el socket del servidor");
         return -1;
     }
 
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(port);
 
+    // Convertir la IP especificada en formato binario
+    if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0) {
+        perror("Error en inet_pton (IP no válida)");
+        close(server_fd);
+        return -1;
+    }
+
+    // Asocia el socket a la IP y puerto especificados
     if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("Error en el bind del servidor");
         close(server_fd);
         return -1;
     }
 
+    // Poner el socket en modo escucha
     if (listen(server_fd, 5) < 0) {
         perror("Error en el listen del servidor");
         close(server_fd);
         return -1;
     }
 
+    printf("Servidor escuchando en %s:%d\n", ip, port);
     return server_fd;
 }
 

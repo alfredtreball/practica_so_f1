@@ -26,6 +26,7 @@
 
 #include "FileReader.h"
 #include "StringUtils.h"
+#include "Networking.h"
 
 // Definició de l'estructura GothamConfig per emmagatzemar la configuració del sistema Gotham
 typedef struct {
@@ -36,49 +37,6 @@ typedef struct {
 } GothamConfig;
 
 //FASE2
-
-// Función para inicializar el servidor de Gotham
-int iniciarServidor(char *ip, int puerto) {
-    int server_fd;
-    struct sockaddr_in direccion;
-
-    // Crear el socket
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd == -1) {
-        perror("Error al crear el socket");
-        exit(1);
-    }
-
-    // Configurar la dirección y el puerto del servidor
-    direccion.sin_family = AF_INET;
-    direccion.sin_port = htons(puerto);
-
-    // Convertir la IP del archivo de configuración en formato binario
-    if (inet_pton(AF_INET, ip, &direccion.sin_addr) <= 0) {
-        perror("Error en inet_pton (IP no válida)");
-        close(server_fd);
-        exit(1);
-    }
-
-    // Asociar el socket a la dirección y puerto
-    if (bind(server_fd, (struct sockaddr*)&direccion, sizeof(direccion)) < 0) {
-        perror("Error en bind");
-        close(server_fd);
-        exit(1);
-    }
-
-    // Ponemos el socket en modo escucha
-    if (listen(server_fd, 10) < 0) {
-        perror("Error en listen");
-        close(server_fd);
-        exit(1);
-    }
-
-    printf("Servidor Gotham escuchando en %s:%d\n", ip, puerto);
-    return server_fd;
-}
-
-
 /***********************************************
 * @Finalitat: Gestionar les connexions entrants de Fleck o workers (Harley/Enigma).
 * Cada connexió es tracta en un fil separat amb buffers dinàmics.
@@ -258,7 +216,13 @@ int main(int argc, char *argv[]) {
     // Llegeix el fitxer de configuració passant l'estructura gothamConfig com a argument
     readConfigFile(argv[1], gothamConfig);
     
-    int server_fd = iniciarServidor(gothamConfig->ipFleck, gothamConfig->portFleck);
+    int server_fd = startServer(gothamConfig->ipFleck, gothamConfig->portFleck);
+
+    if(server_fd < 0){
+        printF("No se pudo iniciar el servidor\n");
+        alliberarMemoria(gothamConfig);
+        return 1;
+    }
 
     //Esperem connexions dels clients
     esperarConexiones(server_fd);
