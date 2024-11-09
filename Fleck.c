@@ -42,6 +42,49 @@ void processCommandWithGotham(const char *command, int gothamSocket) {
     printF("\n");
 }
 
+/*Funció per processar comandes que arriben*/
+void processCommand(char *command, FleckConfig *fleckConfig, int gothamSocket) {
+    char *cmd = strtok(command, " \n");  // Primer paraula
+    char *subCmd = strtok(NULL, " \n");  // Segona paraula
+    char *extra = strtok(NULL, " \n");   // Comprova per a paraules extra
+
+    if (strcasecmp(cmd, "CONNECT") == 0 && subCmd == NULL) {
+        processCommandWithGotham("CONNECT", gothamSocket);
+    } else if (strcasecmp(cmd, "LOGOUT") == 0 && subCmd == NULL) {
+        processCommandWithGotham("LOGOUT", gothamSocket);
+    } else if (strcasecmp(cmd, "LIST") == 0 && extra == NULL) {
+        if (strcasecmp(subCmd, "MEDIA") == 0) {
+            listMedia(fleckConfig->directory);
+        } else if (strcasecmp(subCmd, "TEXT") == 0) {
+            listText(fleckConfig->directory);
+        } else {
+            printF("Comanda KO\n");
+        }
+    } else if (strcasecmp(cmd, "DISTORT") == 0) {
+        char *file = subCmd;
+        char *factorStr = extra;
+        extra = strtok(NULL, " \n"); // Busquem més paraules
+
+        if (file && factorStr && extra == NULL) {  // Assegura que només hi ha 2 paràmetres
+            int factor = atoi(factorStr);
+            char *distortCommand;
+            asprintf(&distortCommand, "DISTORT %s %d", file, factor);
+            processCommandWithGotham(distortCommand, gothamSocket);
+            free(distortCommand);
+        } else {
+            printF("Comanda KO\n");
+        }
+    } else if (strcasecmp(cmd, "CHECK") == 0 && strcasecmp(subCmd, "STATUS") == 0 && extra == NULL) {
+        processCommandWithGotham("CHECK STATUS", gothamSocket);
+    } else if (strcasecmp(cmd, "CLEAR") == 0 && strcasecmp(subCmd, "ALL") == 0 && extra == NULL) {
+        processCommandWithGotham("CLEAR ALL", gothamSocket);
+    } else {
+        printF("ERROR: Please input a valid command.\n");
+    }
+}
+
+//FASE 1
+
 // Funció per llegir el fitxer de configuració
 void readConfigFile(const char *configFile, FleckConfig *fleckConfig) {
     int fd = open(configFile, O_RDONLY);
