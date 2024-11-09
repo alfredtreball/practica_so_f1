@@ -11,121 +11,131 @@
 * EnigmaConfig, així com per alliberar la memòria associada. La configuració inclou 
 * informació sobre servidors i el tipus de treballador.
 ************************************************/
-#define _GNU_SOURCE // Necessari per a que 'asprintf' funcioni correctament
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-
 #include "FileReader.h"
 #include "StringUtils.h"
+#include "Networking.h"
 
-// Definició de la estructura EnigmaConfig per emmagatzemar la configuració del sistema Enigma
+// Definició de l'estructura EnigmaConfig per emmagatzemar la configuració
 typedef struct {
-    char *ipGotham; // Adreça IP del servidor Gotham
-    int portGotham; // Port del servidor Gotham
-    char *ipFleck;  // Adreça IP del servidor Fleck
-    int portFleck;  // Port del servidor Fleck
-    char *directory; // Directori per a la configuració d'Enigma
-    char *workerType; // Tipus de treballador per a la configuració d'Enigma
+    char *ipGotham;
+    int portGotham;
+    char *ipFleck;
+    int portFleck;
+    char *directory;
+    char *workerType;
 } EnigmaConfig;
 
 // Funció per llegir el fitxer de configuració d'Enigma
-/***********************************************
-* @Finalitat: Llegeix el fitxer de configuració especificat i carrega la informació en una estructura EnigmaConfig.
-* @Paràmetres: 
-*   in: configFile = nom del fitxer de configuració.
-*   out: enigmaConfig = estructura on s'emmagatzema la configuració llegida.
-* @Retorn: ----
-************************************************/
 void readConfigFile(const char *configFile, EnigmaConfig *enigmaConfig) {
-    int fd = open(configFile, O_RDONLY); // Obre el fitxer en mode només lectura
-
+    int fd = open(configFile, O_RDONLY);
     if (fd == -1) {
-        printF("Error obrint el fitxer de configuració\n"); // Missatge d'error si no es pot obrir
-        exit(1); // Finalitza el programa en cas d'error
+        printF("Error obrint el fitxer de configuració\n");
+        exit(1);
     }
 
-    // Llegeix i assigna la memòria per a cada camp de la configuració
-    enigmaConfig->ipGotham = readUntil(fd, '\n'); // Llegeix la IP del servidor Gotham
-    char* portGotham = readUntil(fd, '\n'); // Llegeix el port com a cadena de text
-    enigmaConfig->portGotham = atoi(portGotham); // Converteix el port a enter
-    free(portGotham); // Allibera la memòria de la cadena temporal
+    enigmaConfig->ipGotham = trim(readUntil(fd, '\n'));
+    char* portGotham = readUntil(fd, '\n');
+    enigmaConfig->portGotham = atoi(portGotham);
+    free(portGotham);
 
-    enigmaConfig->ipFleck = readUntil(fd, '\n'); // Llegeix la IP del servidor Fleck
-    char *portFleck = readUntil(fd, '\n'); // Llegeix el port com a cadena de text
-    enigmaConfig->portFleck = atoi(portFleck); // Converteix el port a enter
-    free(portFleck); // Allibera la memòria de la cadena temporal
+    enigmaConfig->ipFleck = trim(readUntil(fd, '\n'));
+    char *portFleck = readUntil(fd, '\n');
+    enigmaConfig->portFleck = atoi(portFleck);
+    free(portFleck);
 
-    enigmaConfig->directory = readUntil(fd, '\n'); // Llegeix el directori de configuració
-    enigmaConfig->workerType = readUntil(fd, '\n'); // Llegeix el tipus de treballador
+    enigmaConfig->directory = readUntil(fd, '\n');
+    enigmaConfig->workerType = readUntil(fd, '\n');
+    close(fd);
 
-    close(fd); // Tanca el fitxer
-
-    // Mostra la configuració llegida per a verificació
-    printF("Ip Gotham - ");
+    printF("Configuració llegida:\n");
+    printF("IP Gotham: ");
     printF(enigmaConfig->ipGotham);
-    printF("\nPort Gotham - ");
-    char* portGothamStr = NULL;
-    asprintf(&portGothamStr, "%d", enigmaConfig->portGotham); // Converteix el port a cadena de text
+    printF("\nPort Gotham: ");
+    char *portGothamStr;
+    asprintf(&portGothamStr, "%d\n", enigmaConfig->portGotham);
     printF(portGothamStr);
-    free(portGothamStr); // Allibera la memòria de la cadena temporal
-
-    printF("\nIp Fleck - ");
+    free(portGothamStr);
+    
+    printF("IP Fleck: ");
     printF(enigmaConfig->ipFleck);
-    printF("\nPort Fleck - ");
-    char* portFleckStr = NULL;
-    asprintf(&portFleckStr, "%d", enigmaConfig->portFleck); // Converteix el port a cadena de text
+    printF("\nPort Fleck: ");
+    char *portFleckStr;
+    asprintf(&portFleckStr, "%d\n", enigmaConfig->portFleck);
     printF(portFleckStr);
-    free(portFleckStr); // Allibera la memòria de la cadena temporal
-
-    printF("\nDirectory - ");
+    free(portFleckStr);
+    
+    printF("Directori: ");
     printF(enigmaConfig->directory);
-
-    printF("\nWorker Type - ");
+    printF("\nTipus de treballador: ");
     printF(enigmaConfig->workerType);
     printF("\n");
 }
 
-// Funció per alliberar la memòria dinàmica utilitzada per la configuració d'Enigma
-/***********************************************
-* @Finalitat: Allibera la memòria dinàmica associada amb l'estructura EnigmaConfig.
-* @Paràmetres: 
-*   in: enigmaConfig = estructura EnigmaConfig a alliberar.
-* @Retorn: ----
-************************************************/
+// Funció per alliberar la memòria de l'estructura EnigmaConfig
 void alliberarMemoria(EnigmaConfig *enigmaConfig) {
-    if (enigmaConfig->ipGotham) {
-        free(enigmaConfig->ipGotham); // Allibera la memòria de la IP Gotham
-    }
-    if (enigmaConfig->ipFleck) {
-        free(enigmaConfig->ipFleck); // Allibera la memòria de la IP Fleck
-    }
-    if (enigmaConfig->directory) {
-        free(enigmaConfig->directory); // Allibera la memòria del directori
-    }
-    if (enigmaConfig->workerType) {
-        free(enigmaConfig->workerType); // Allibera la memòria del tipus de treballador
-    }
-    free(enigmaConfig); // Finalment, allibera la memòria de l'estructura principal
+    if (enigmaConfig->ipGotham) free(enigmaConfig->ipGotham);
+    if (enigmaConfig->ipFleck) free(enigmaConfig->ipFleck);
+    if (enigmaConfig->directory) free(enigmaConfig->directory);
+    if (enigmaConfig->workerType) free(enigmaConfig->workerType);
+    free(enigmaConfig);
 }
 
-// Funció principal
+// Funció principal per a Enigma
 int main(int argc, char *argv[]) {
-    // Crea la variable local per a la configuració d'Enigma
-    EnigmaConfig *enigmaConfig = (EnigmaConfig *)malloc(sizeof(EnigmaConfig));
-    
     if (argc != 2) {
-        printF("Ús: ./enigma <fitxer de configuració>\n"); // Comprova que s'ha passat el fitxer de configuració com a argument
-        exit(1); // Finalitza el programa en cas d'error
+        printF("Ús: ./enigma <fitxer de configuració>\n");
+        return 1;
     }
 
-    // Llegeix la configuració passant l'estructura enigmaConfig com a argument
+    EnigmaConfig *enigmaConfig = malloc(sizeof(EnigmaConfig));
     readConfigFile(argv[1], enigmaConfig);
 
-    // Allibera la memòria dinàmica per evitar fuites de memòria
-    alliberarMemoria(enigmaConfig);
+    // Connecta a Gotham
+    int gothamSocket = connect_to_server(enigmaConfig->ipGotham, enigmaConfig->portGotham);
+    if (gothamSocket < 0) {
+        printF("Error connectant a Gotham\n");
+        alliberarMemoria(enigmaConfig);
+        return 1;
+    }
 
-    return 0; // Finalitza correctament el programa
+    // Envia un missatge de registre com a treballador de text o media
+    char registerMessage[FRAME_SIZE];
+    snprintf(registerMessage, FRAME_SIZE, "REGISTER WORKER %s", enigmaConfig->workerType);
+    send_frame(gothamSocket, registerMessage, strlen(registerMessage));
+
+    printF("Registrat a Gotham com a worker de tipus: ");
+    printF(enigmaConfig->workerType);
+    printF("\n");
+
+    // Espera i processa les peticions de Gotham
+    char buffer[FRAME_SIZE];
+    while (1) {
+        if (receive_frame(gothamSocket, buffer) < 0) {
+            printF("Error rebent la petició de Gotham\n");
+            break;
+        }
+        printF("Petició rebuda: ");
+        printF(buffer);
+        printF("\n");
+
+        // Processa la petició (aquí pots afegir distorsions simulades)
+        char response[FRAME_SIZE];
+        snprintf(response, FRAME_SIZE, "Processed: %.244s", buffer);
+
+
+        send_frame(gothamSocket, response, strlen(response));
+        printF("Resposta enviada a Gotham: ");
+        printF(response);
+        printF("\n");
+    }
+
+    close(gothamSocket);
+    alliberarMemoria(enigmaConfig);
+    return 0;
 }
