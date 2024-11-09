@@ -20,9 +20,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-
 #include "FileReader.h"
 #include "StringUtils.h"
+#include "Networking.h" // Inclou la funció connect_to_server
 
 // Definició de l'estructura HarleyConfig per emmagatzemar la configuració del sistema Harley
 typedef struct {
@@ -35,13 +35,6 @@ typedef struct {
 } HarleyConfig;
 
 // Funció per llegir el fitxer de configuració de Harley
-/***********************************************
-* @Finalitat: Llegeix el fitxer de configuració especificat i emmagatzema la informació a la estructura HarleyConfig.
-* @Paràmetres:
-*   in: configFile = nom del fitxer de configuració.
-*   out: harleyConfig = estructura on s'emmagatzema la configuració llegida.
-* @Retorn: ----
-************************************************/
 void readConfigFile(const char *configFile, HarleyConfig *harleyConfig) {
     int fd = open(configFile, O_RDONLY); // Obre el fitxer en mode només lectura
 
@@ -92,26 +85,12 @@ void readConfigFile(const char *configFile, HarleyConfig *harleyConfig) {
 }
 
 // Funció per alliberar la memòria dinàmica utilitzada per HarleyConfig
-/***********************************************
-* @Finalitat: Allibera la memòria dinàmica associada amb l'estructura HarleyConfig.
-* @Paràmetres:
-*   in: harleyConfig = estructura HarleyConfig a alliberar.
-* @Retorn: ----
-************************************************/
 void alliberarMemoria(HarleyConfig *harleyConfig) {
-    if (harleyConfig->ipGotham) {
-        free(harleyConfig->ipGotham); // Allibera la memòria de la IP Gotham
-    }
-    if (harleyConfig->ipFleck) {
-        free(harleyConfig->ipFleck); // Allibera la memòria de la IP Fleck
-    }
-    if (harleyConfig->directory) {
-        free(harleyConfig->directory); // Allibera la memòria del directori
-    }
-    if (harleyConfig->workerType) {
-        free(harleyConfig->workerType); // Allibera la memòria del tipus de treballador
-    }
-    free(harleyConfig); // Finalment, allibera la memòria de l'estructura principal
+    if (harleyConfig->ipGotham) free(harleyConfig->ipGotham);
+    if (harleyConfig->ipFleck) free(harleyConfig->ipFleck);
+    if (harleyConfig->directory) free(harleyConfig->directory);
+    if (harleyConfig->workerType) free(harleyConfig->workerType);
+    free(harleyConfig);
 }
 
 // Funció principal
@@ -120,15 +99,34 @@ int main(int argc, char *argv[]) {
     HarleyConfig *harleyConfig = (HarleyConfig *)malloc(sizeof(HarleyConfig));
     
     if (argc != 2) {
-        printF("Ús: ./harley <fitxer de configuració>\n"); // Comprova que s'ha passat el fitxer de configuració com a argument
-        exit(1); // Finalitza el programa en cas d'error
+        printF("Ús: ./harley <fitxer de configuració>\n");
+        exit(1);
     }
 
     // Llegeix el fitxer de configuració passant l'estructura harleyConfig com a argument
     readConfigFile(argv[1], harleyConfig);
 
-    // Allibera la memòria dinàmica abans de finalitzar
-    alliberarMemoria(harleyConfig);
+    // Connecta a Gotham
+    int gothamSocket = connect_to_server(harleyConfig->ipGotham, harleyConfig->portGotham);
+    if (gothamSocket < 0) {
+        printF("Error connectant a Gotham\n");
+        alliberarMemoria(harleyConfig);
+        return 1;
+    }
 
-    return 0; // Finalitza correctament el programa
+    // Envia un missatge de registre com a treballador
+    char registerMessage[FRAME_SIZE];
+    snprintf(registerMessage, FRAME_SIZE, "REGISTER WORKER %s", harleyConfig->workerType);
+    send_frame(gothamSocket, registerMessage, strlen(registerMessage));
+
+    printF("Registrat a Gotham com a worker de tipus: ");
+    printF(harleyConfig->workerType);
+    printF("\n");
+
+    // Aquí pots implementar més funcionalitats si es requereix en el futur
+    // Ara només mantindrà la connexió oberta per a rebre i processar peticions
+
+    close(gothamSocket);
+    alliberarMemoria(harleyConfig);
+    return 0;
 }

@@ -99,7 +99,14 @@ void *gestionarConexion(void *arg) {
 *   in: server_fd = descriptor del servidor per a acceptar connexions.
 * @Retorn: ----
 ************************************************/
-void esperarConexiones(int server_fd) {
+/***********************************************
+* @Finalitat: Bucle principal que accepta connexions entrants i crea un fil per a cada connexió.
+* @Paràmetres:
+*   in: arg = descriptor del servidor passat com a `void *`.
+* @Retorn: ----
+************************************************/
+void *esperarConexiones(void *arg) {
+    int server_fd = *(int *)arg;
     struct sockaddr_in direccionCliente;
     socklen_t tamanoDireccion = sizeof(direccionCliente);
 
@@ -107,7 +114,7 @@ void esperarConexiones(int server_fd) {
         int *client_fd = malloc(sizeof(int)); // Punter a un descriptor de client
         if (client_fd == NULL) {
             perror("Error en malloc per client_fd");
-            exit(1);
+            pthread_exit(NULL); // Salir del hilo en caso de error
         }
 
         // Acceptar una connexió entrant
@@ -120,9 +127,9 @@ void esperarConexiones(int server_fd) {
 
         // Mostrar la IP i port del client connectat
         char ipCliente[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &(direccionCliente.sin_addr), ipCliente, INET_ADDRSTRLEN); //Per convertir de format binari a una legible
-        printf("Connexió acceptada de %s:%d\n", ipCliente, ntohs(direccionCliente.sin_port)); //Per convertir de ordre de representació de
-                                                                                              //bytes de red BigEndian a la de host
+        inet_ntop(AF_INET, &(direccionCliente.sin_addr), ipCliente, INET_ADDRSTRLEN);
+        printf("Connexió acceptada de %s:%d\n", ipCliente, ntohs(direccionCliente.sin_port));
+
         // Crear un nou fil per gestionar la connexió
         pthread_t thread_fd;
         if (pthread_create(&thread_fd, NULL, gestionarConexion, client_fd) != 0) {
@@ -131,10 +138,12 @@ void esperarConexiones(int server_fd) {
             free(client_fd);
         }
 
-        // Desvincular el fil perquè no bloquegi els recursos després d'acabar, no es necessari esperar a que acabi aquest thread
-        pthread_detach(thread_fd); //Per no fer que es bloqueji el thread i poguem acceptar més connexions
+        // Desvincular el fil perquè no bloquegi els recursos després d'acabar
+        pthread_detach(thread_fd);
     }
+    pthread_exit(NULL); // Salir correctamente del hilo
 }
+
 //FASE1
 
 // Funció per llegir el fitxer de configuració de Gotham
@@ -203,32 +212,69 @@ void alliberarMemoria(GothamConfig *gothamConfig) {
     free(gothamConfig); // Finalment, allibera la memòria de l'estructura principal
 }
 
-// Funció principal
 int main(int argc, char *argv[]) {
-    // Crea la variable local per a la configuració de Gotham
+    // Crea la variable local para la configuración de Gotham
     GothamConfig *gothamConfig = (GothamConfig *)malloc(sizeof(GothamConfig));
-    
-    if (argc != 2) {
-        printF("Ús: ./gotham <fitxer de configuració>\n"); // Comprova que s'ha passat el fitxer de configuració com a argument
-        exit(1); // Finalitza el programa en cas d'error
+    if (!gothamConfig) {
+        perror("Error en malloc para gothamConfig");
+        return 1;
     }
 
-    // Llegeix el fitxer de configuració passant l'estructura gothamConfig com a argument
-    readConfigFile(argv[1], gothamConfig);
-    
-    int server_fd = startServer(gothamConfig->ipFleck, gothamConfig->portFleck);
+    if (argc != 2) {
+        printF("Ús: ./gotham <fitxer de configuració>\n");
+        free(gothamConfig);  // Liberar memoria en caso de error
+        return 1;
+    }
 
-    if(server_fd < 0){
-        printF("No se pudo iniciar el servidor\n");
+    // Leer el archivo de configuración
+    readConfigFile(argv[1], gothamConfig);
+
+    // Configura y crea el primer socket del servidor (Fleck)
+    int server_fd_fleck = startServer(gothamConfig->ipFleck, gothamConfig->portFleck);
+    if (server_fd_fleck < 0) {
+        printF("No se pudo iniciar el servidor para Fleck\n");
         alliberarMemoria(gothamConfig);
         return 1;
     }
 
-    //Esperem connexions dels clients
-    esperarConexiones(server_fd);
+    // Configura y crea el segundo socket del servidor (Harley/Enigma)
+    int server_fd_enigma = startServer(gothamConfig->ipHarEni, gothamConfig->portHarEni);
+    if (server_fd_enigma < 0) {
+        printF("No se pudo iniciar el servidor para Harley/Enigma\n");
+        close(server_fd_fleck);  // Cerrar el servidor Fleck antes de salir
+        alliberarMemoria(gothamConfig);
+        return 1;
+    }
 
-    // Allibera la memòria dinàmica abans de finalitzar
+    // Iniciar hilos para aceptar conexiones en ambos sockets
+    pthread_t fleck_thread, enigma_thread;
+
+    if (pthread_create(&fleck_thread, NULL, (void *(*)(void *))esperarConexiones, &server_fd_fleck) != 0) {
+        perror("Error creando el hilo para conexiones de Fleck");
+        close(server_fd_fleck);
+        close(server_fd_enigma);
+        alliberarMemoria(gothamConfig);
+        return 1;
+    }
+
+    if (pthread_create(&enigma_thread, NULL, (void *(*)(void *))esperarConexiones, &server_fd_enigma) != 0) {
+        perror("Error creando el hilo para conexiones de Harley/Enigma");
+        pthread_cancel(fleck_thread);  // Cancelar el hilo de Fleck en caso de error
+        close(server_fd_fleck);
+        close(server_fd_enigma);
+        alliberarMemoria(gothamConfig);
+        return 1;
+    }
+
+    // Esperar a que los hilos terminen
+    pthread_join(fleck_thread, NULL);
+    pthread_join(enigma_thread, NULL);
+
+    // Liberar recursos y memoria
+    close(server_fd_fleck);
+    close(server_fd_enigma);
     alliberarMemoria(gothamConfig);
 
-    return 0; // Finalitza correctament el programa
+    return 0;
 }
+
