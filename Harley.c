@@ -44,12 +44,12 @@ void readConfigFile(const char *configFile, HarleyConfig *harleyConfig) {
     }
 
     // Llegeix i assigna memòria per a cada camp de la configuració
-    harleyConfig->ipGotham = readUntil(fd, '\n'); // Llegeix la IP del servidor Gotham
+    harleyConfig->ipGotham = trim(readUntil(fd, '\n')); // Llegeix la IP del servidor Gotham
     char *portGotham = readUntil(fd, '\n'); // Llegeix el port com a cadena de text
     harleyConfig->portGotham = atoi(portGotham); // Converteix el port a enter
     free(portGotham); // Allibera la memòria de la cadena temporal
 
-    harleyConfig->ipFleck = readUntil(fd, '\n'); // Llegeix la IP del servidor Fleck
+    harleyConfig->ipFleck = trim(readUntil(fd, '\n')); // Llegeix la IP del servidor Fleck
     char* portFleck = readUntil(fd, '\n'); // Llegeix el port com a cadena de text
     harleyConfig->portFleck = atoi(portFleck); // Converteix el port a enter
     free(portFleck); // Allibera la memòria de la cadena temporal
