@@ -24,6 +24,153 @@ typedef struct {
 
 FleckConfig *globalFleckConfig = NULL;
 
+// Funció per llistar els fitxers de text (.txt) en el directori especificat
+/***********************************************
+* @Finalitat: Llista els fitxers amb l'extensió .txt en el directori especificat 
+*             utilitzant el comandament find del sistema.
+* @Paràmetres:
+*   in: directory = el directori on buscar els fitxers.
+* @Retorn: ----
+************************************************/
+void listText(const char *directory) {
+    pid_t pid = fork();
+
+    if (pid == 0) { // Procés fill
+        int tempFd = open("text_files.txt", O_WRONLY | O_CREAT | O_TRUNC, 0777);
+        if (tempFd == -1) {
+            printF("Error obrint el fitxer temporal\n");
+            exit(1);
+        }
+        dup2(tempFd, STDOUT_FILENO); // Redirigeix la sortida estàndard al fitxer temporal
+        close(tempFd);
+
+        // Executa el comandament find per buscar fitxers de text
+        char *args[] = {"/usr/bin/find", (char *)directory, "-type", "f", "-name", "*.txt", "-exec", "basename", "{}", ";", NULL};
+        execv(args[0], args);
+
+        // Si execv falla
+        printF("Error executant find\n");
+        exit(1);
+    } else if (pid > 0) { // Procés pare
+        wait(NULL);
+
+        int tempFd = open("text_files.txt", O_RDONLY);
+        if (tempFd == -1) {
+            printF("Error obrint el fitxer temporal\n");
+            return;
+        }
+
+        int count = 0;
+        char *line;
+        // Llegeix línies del fitxer temporal
+        while ((line = readUntil(tempFd, '\n')) != NULL) {
+            count++;
+            free(line);
+        }
+
+        // Mostra el nombre de fitxers trobats
+        char *countStr = intToStr(count);
+        printF("There are ");
+        printF(countStr);
+        printF(" text files available:\n");
+        free(countStr);
+
+        lseek(tempFd, 0, SEEK_SET); // Torna al començament del fitxer temporal
+
+        int index = 1;
+        while ((line = readUntil(tempFd, '\n')) != NULL) {
+            char *indexStr = intToStr(index++);
+            printF(indexStr);
+            printF(". ");
+            printF(line);
+            printF("\n");
+            free(indexStr);
+            free(line);
+        }
+
+        close(tempFd);
+    } else {
+        printF("Error en fork\n");
+    }
+}
+
+// Funció per llistar els fitxers de tipus mitjà (wav, jpg, png) en el directori especificat
+/***********************************************
+* @Finalitat: Llista els fitxers amb extensions .wav, .jpg, o .png en el directori especificat 
+*             utilitzant un script de bash per a executar el comandament find.
+* @Paràmetres:
+*   in: directory = el directori on buscar els fitxers.
+* @Retorn: ----
+************************************************/
+
+
+void listMedia(const char *directory) {
+    pid_t pid = fork();
+
+    if (pid == 0) { // Procés fill
+        int tempFd = open("media_files.txt", O_WRONLY | O_CREAT | O_TRUNC, 0777);
+        if (tempFd == -1) {
+            printF("Error obrint el fitxer temporal\n");
+            exit(1);
+        }
+        dup2(tempFd, STDOUT_FILENO); // Redirigeix la sortida estàndard al fitxer temporal
+        close(tempFd);
+
+        // Executa el comandament find per buscar fitxers de mitjans
+        char *args[] = {
+            "/bin/bash", "-c", // Executa bash amb l'opció -c per passar un script com a cadena
+            "find \"$1\" -type f \\( -name '*.wav' -o -name '*.jpg' -o -name '*.png' \\) -exec basename {} \\;", // Comandament find per buscar fitxers amb extensions especificades
+            "bash", (char *)directory, NULL // Arguments addicionals per bash
+        };
+        execv(args[0], args);
+
+        // Si execv falla
+        printF("Error executant find\n");
+        exit(1);
+    } else if (pid > 0) { // Procés pare
+        wait(NULL);
+
+        int tempFd = open("media_files.txt", O_RDONLY);
+        if (tempFd == -1) {
+            printF("Error obrint el fitxer temporal\n");
+            return;
+        }
+
+        int count = 0;
+        char *line;
+        // Llegeix línies del fitxer temporal
+        while ((line = readUntil(tempFd, '\n')) != NULL) {
+            count++;
+            free(line);
+        }
+
+        // Mostra el nombre de fitxers trobats
+        char *countStr = intToStr(count);
+        printF("There are ");
+        printF(countStr);
+        printF(" media files available:\n");
+        free(countStr);
+
+        lseek(tempFd, 0, SEEK_SET); // Torna al començament del fitxer temporal
+
+        int index = 1;
+        while ((line = readUntil(tempFd, '\n')) != NULL) {
+            char *indexStr = intToStr(index++);
+            printF(indexStr);
+            printF(". ");
+            printF(line);
+            printF("\n");
+            free(indexStr);
+            free(line);
+        }
+
+        close(tempFd);
+    } else {
+        printF("Error en fork\n");
+    }
+}
+
+
 // Funció per processar una comanda i enviar-la a Gotham
 void processCommandWithGotham(const char *command, int gothamSocket) {
     if (send_frame(gothamSocket, command, strlen(command)) < 0) {
