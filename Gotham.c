@@ -104,18 +104,30 @@ void *esperarConexiones(void *arg) {
 }
 
 void processCommandInGotham(const char *command, int client_fd) {
+    printF("Trama rebuda correctament a Gotham: ");
+    printF(command);
+    printF("\n");
+
     if (strcmp(command, "CONNECT") == 0) {
         // Registra la connexió
         printF("Client connectat\n");
-        send_frame(client_fd, "OK", 2);  // Envia resposta de confirmació
+        send_frame(client_fd, "ACK", 2);  // Envia resposta de confirmació
     } 
     else if (strncmp(command, "DISTORT", 7) == 0) {
-        // Processa la comanda DISTORT
-        // (Afegeix la lògica específica per processar els paràmetres i enviar resposta)
+        printF("Processant comanda DISTORT\n");
+
+        // Confirma que DISTORT ha estat rebut i processat
+        send_frame(client_fd, "ACK DISTORT", 10);
     } 
     else if (strcmp(command, "CHECK STATUS") == 0) {
-        // Respon amb l'estat actual
-        send_frame(client_fd, "STATUS OK", 9); // Envia resposta de confirmació d'estat
+        printF("Comprovant estat actual\n");
+        send_frame(client_fd, "STATUS OK ACK", 12); 
+    } 
+    else if (strcmp(command, "CLEAR ALL") == 0) {
+        printF("Processant comanda CLEAR ALL\n");
+
+        // Confirma que CLEAR ALL ha estat rebut i processat
+        send_frame(client_fd, "ACK CLEAR ALL", 13);
     } 
     else {
         // Comanda desconeguda
