@@ -12,6 +12,7 @@
 
 char *trim(char *str);
 void removeChar(char *string, char charToRemove);
+int esTipoValido(const char *filename, const char *workerType);
 int endsWith(char *str, char *suffix);
 
 #endif // STRINGUTILS_H

@@ -18,64 +18,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include "FileReader.h"
-#include "StringUtils.h"
+#include "StringUtils.h" // Inclou la funció esTipoValido
 #include "Networking.h"
-
-// Definició de l'estructura EnigmaConfig per emmagatzemar la configuració
-typedef struct {
-    char *ipGotham;
-    int portGotham;
-    char *ipFleck;
-    int portFleck;
-    char *directory;
-    char *workerType;
-} EnigmaConfig;
-
-// Funció per llegir el fitxer de configuració d'Enigma
-void readConfigFile(const char *configFile, EnigmaConfig *enigmaConfig) {
-    int fd = open(configFile, O_RDONLY);
-    if (fd == -1) {
-        printF("Error obrint el fitxer de configuració\n");
-        exit(1);
-    }
-
-    enigmaConfig->ipGotham = trim(readUntil(fd, '\n'));
-    char* portGotham = readUntil(fd, '\n');
-    enigmaConfig->portGotham = atoi(portGotham);
-    free(portGotham);
-
-    enigmaConfig->ipFleck = trim(readUntil(fd, '\n'));
-    char *portFleck = readUntil(fd, '\n');
-    enigmaConfig->portFleck = atoi(portFleck);
-    free(portFleck);
-
-    enigmaConfig->directory = readUntil(fd, '\n');
-    enigmaConfig->workerType = readUntil(fd, '\n');
-    close(fd);
-
-    printF("Configuració llegida:\n");
-    printF("IP Gotham: ");
-    printF(enigmaConfig->ipGotham);
-    printF("\nPort Gotham: ");
-    char *portGothamStr;
-    asprintf(&portGothamStr, "%d\n", enigmaConfig->portGotham);
-    printF(portGothamStr);
-    free(portGothamStr);
-    
-    printF("IP Fleck: ");
-    printF(enigmaConfig->ipFleck);
-    printF("\nPort Fleck: ");
-    char *portFleckStr;
-    asprintf(&portFleckStr, "%d\n", enigmaConfig->portFleck);
-    printF(portFleckStr);
-    free(portFleckStr);
-    
-    printF("Directori: ");
-    printF(enigmaConfig->directory);
-    printF("\nTipus de treballador: ");
-    printF(enigmaConfig->workerType);
-    printF("\n");
-}
 
 // Funció per alliberar la memòria de l'estructura EnigmaConfig
 void alliberarMemoria(EnigmaConfig *enigmaConfig) {
@@ -94,7 +38,12 @@ int main(int argc, char *argv[]) {
     }
 
     EnigmaConfig *enigmaConfig = malloc(sizeof(EnigmaConfig));
-    readConfigFile(argv[1], enigmaConfig);
+    if (!enigmaConfig) {
+        printF("Error assignant memòria per a la configuració\n");
+        return 1;
+    }
+
+    readConfigFileGeneric(argv[1], enigmaConfig, CONFIG_ENIGMA);
 
     // Connecta a Gotham
     int gothamSocket = connect_to_server(enigmaConfig->ipGotham, enigmaConfig->portGotham);
@@ -113,7 +62,7 @@ int main(int argc, char *argv[]) {
     printF(enigmaConfig->workerType);
     printF("\n");
 
-    // Espera i processa les peticions de Gotham
+    // Bucle per rebre i processar peticions
     char buffer[FRAME_SIZE];
     while (1) {
         if (receive_frame(gothamSocket, buffer) < 0) {
@@ -124,10 +73,22 @@ int main(int argc, char *argv[]) {
         printF(buffer);
         printF("\n");
 
-        // Processa la petició (aquí pots afegir distorsions simulades)
+        //Verifiquem si és tipus text
+        char *filename = buffer;
+
+        if (esTipoValido(filename, enigmaConfig->workerType)) {
+            printF("Fitxer acceptat: ");
+            printF(filename);
+            printF("\n");
+        } else {
+            printF("Fitxer no acceptat: ");
+            printF(filename);
+            printF("\nWorker text només accepta tipus de fitxer: .txt\n");
+        }
+
+        // Preparar i enviar la resposta
         char response[FRAME_SIZE];
         snprintf(response, FRAME_SIZE, "Processed: %.244s", buffer);
-
 
         send_frame(gothamSocket, response, strlen(response));
         printF("Resposta enviada a Gotham: ");

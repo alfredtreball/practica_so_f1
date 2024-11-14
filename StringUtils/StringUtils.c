@@ -1,8 +1,33 @@
 // StringUtils.c
 #include <ctype.h>
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
 #include "StringUtils.h"
+
+/***********************************************
+* @Finalitat: Verifica si l'extensió del fitxer és compatible amb el tipus de worker.
+* @Paràmetres:
+*   in: filename = nom del fitxer.
+*   in: workerType = tipus de worker ("media" o "text").
+* @Retorn: Retorna 1 si el tipus de fitxer és compatible, en cas contrari retorna 0.
+************************************************/
+int esTipoValido(const char *filename, const char *workerType) {
+    const char *extension = strrchr(filename, '.');
+    if (extension == NULL) {
+        return 0;
+    }
+
+    if (strcasecmp(workerType, "media") == 0) {
+        return (strcasecmp(extension, ".wav") == 0 || 
+                strcasecmp(extension, ".jpg") == 0 || 
+                strcasecmp(extension, ".png") == 0);
+    } else if (strcasecmp(workerType, "text") == 0) {
+        return (strcasecmp(extension, ".txt") == 0);
+    }
+
+    return 0;
+}
 
 /***********************************************
 * @Finalitat: Elimina els espais en blanc que es troben al començament i al final de la cadena.

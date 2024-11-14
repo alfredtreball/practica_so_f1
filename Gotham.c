@@ -28,173 +28,136 @@
 #include "StringUtils.h"
 #include "Networking.h"
 
-// Definició de l'estructura GothamConfig per emmagatzemar la configuració del sistema Gotham
-typedef struct {
-    char *ipFleck;    // Adreça IP del servidor Fleck
-    int portFleck;    // Port del servidor Fleck
-    char *ipHarEni;   // Adreça IP del servidor Harley Enigma
-    int portHarEni;   // Port del servidor Harley Enigma
-} GothamConfig;
-
 //FASE2
+void *gestionarConexion(void *arg);
 /***********************************************
-* @Finalitat: Gestionar les connexions entrants de Fleck o workers (Harley/Enigma).
-* Cada connexió es tracta en un fil separat amb buffers dinàmics.
+* @Finalitat: Bucle principal que accepta connexions entrants i crea un fil per a cada connexió.
+* @Paràmetres:
+*   in: arg = descriptor del servidor passat com a `void *`.
+*   in: server_fd = descriptor del servidor per a acceptar connexions.
+* @Retorn: ----
+************************************************/
+void *esperarConexiones(void *arg) {
+    // Descriptors de socket per a Fleck, Enigma i Harley (assumeix que es passen al struct de l’argument)
+    int server_fd_fleck = ((int *)arg)[0];  
+    int server_fd_enigma = ((int *)arg)[1]; 
+    int server_fd_harley = ((int *)arg)[2]; 
+
+    // Conjunt de descriptors per utilitzar amb select()
+    fd_set read_fds;
+    
+    // Selecciona el descriptor més gran entre els tres sockets per indicar-lo a select()
+    int max_fd = server_fd_fleck;
+    if (server_fd_enigma > max_fd) max_fd = server_fd_enigma;
+    if (server_fd_harley > max_fd) max_fd = server_fd_harley;
+
+    while (1) {
+        // Inicialitza el conjunt de descriptors abans d’afegir-hi nous
+        FD_ZERO(&read_fds);
+        FD_SET(server_fd_fleck, &read_fds);   // Afegeix el socket de Fleck
+        FD_SET(server_fd_enigma, &read_fds);  // Afegeix el socket d’Enigma
+        FD_SET(server_fd_harley, &read_fds);  // Afegeix el socket de Harley
+
+        // select() espera que un dels descriptors estigui llest per operar
+        int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+        if (activity < 0) { 
+            perror("Error en select"); // Mostra un missatge d’error si select() falla
+            continue; 
+        }
+
+        // Gestiona les connexions segons el socket que activi l'activitat
+        
+        // Comprova si hi ha activitat en el socket de Fleck
+        if (FD_ISSET(server_fd_fleck, &read_fds)) {
+            int *client_fd = malloc(sizeof(int));
+            *client_fd = accept(server_fd_fleck, NULL, NULL);
+            if (*client_fd >= 0) {
+                pthread_t fleck_thread;
+                pthread_create(&fleck_thread, NULL, gestionarConexion, client_fd); 
+                pthread_detach(fleck_thread);
+            }
+        }
+
+        // Comprova si hi ha activitat en el socket d’Enigma
+        if (FD_ISSET(server_fd_enigma, &read_fds)) {
+            int *client_fd = malloc(sizeof(int));
+            *client_fd = accept(server_fd_enigma, NULL, NULL);
+            if (*client_fd >= 0) {
+                pthread_t enigma_thread;
+                pthread_create(&enigma_thread, NULL, gestionarConexion, client_fd);
+                pthread_detach(enigma_thread);
+            }
+        }
+
+        // Comprova si hi ha activitat en el socket de Harley
+        if (FD_ISSET(server_fd_harley, &read_fds)) {
+            int *client_fd = malloc(sizeof(int));
+            *client_fd = accept(server_fd_harley, NULL, NULL);
+            if (*client_fd >= 0) {
+                pthread_t harley_thread;
+                pthread_create(&harley_thread, NULL, gestionarConexion, client_fd);
+                pthread_detach(harley_thread);
+            }
+        }
+    }
+    return NULL;
+}
+
+void processCommandInGotham(const char *command, int client_fd) {
+    if (strcmp(command, "CONNECT") == 0) {
+        // Registra la connexió
+        printF("Client connectat\n");
+        send_frame(client_fd, "OK", 2);  // Envia resposta de confirmació
+    } 
+    else if (strncmp(command, "DISTORT", 7) == 0) {
+        // Processa la comanda DISTORT
+        // (Afegeix la lògica específica per processar els paràmetres i enviar resposta)
+    } 
+    else if (strcmp(command, "CHECK STATUS") == 0) {
+        // Respon amb l'estat actual
+        send_frame(client_fd, "STATUS OK", 9); // Envia resposta de confirmació d'estat
+    } 
+    else {
+        // Comanda desconeguda
+        send_frame(client_fd, "ERROR: Comanda desconeguda", 26);
+    }
+}
+
+/***********************************************
+* @Finalitat: Gestiona les connexions entrants de Fleck, Enigma o Harley.
+* Cada connexió es tracta en un fil separat, on es reben trames i es processa la comanda.
 * @Paràmetres:
 *   in: arg = punter a un descriptor de fitxer del client (client_fd).
 * @Retorn: ----
 ************************************************/
 void *gestionarConexion(void *arg) {
-    int client_fd = *(int *)arg;
-    free(arg);
+    int client_fd = *(int *)arg; // Descriptor de fitxer del client
+    free(arg); // Alliberem la memòria assignada a l'argument
 
-    char *buffer = NULL;
-    ssize_t bytesLeidos;
-    size_t totalBytes = 0;
+    char data[FRAME_SIZE]; // Buffer per emmagatzemar les dades de la trama
+    int data_length;       // Longitud de les dades rebudes
 
-    // Bucle per llegir missatges del client
     while (1) {
-        // Realitzem una lectura inicial per a veure si hi ha dades
-        char tmpBuffer[128]; // Buffer temporal
-        bytesLeidos = read(client_fd, tmpBuffer, sizeof(tmpBuffer));
-
-        if (bytesLeidos <= 0) {
-            // Si no es llegeixen bytes o hi ha un error, finalitzem la connexió
-            printF("Client desconnectat\n");
-            break;
+        // Recepció de la trama
+        if (receive_frame(client_fd, data, &data_length) < 0) {
+            printF("Error rebent la trama o client desconnectat\n");
+            break; // Si hi ha un error, es tanca la connexió
         }
 
-        // Actualitzem el buffer dinàmic amb les dades llegides
-        totalBytes += bytesLeidos;
-        buffer = (char *)realloc(buffer, totalBytes + 1); // Redimensionem el buffer
-        if (buffer == NULL) {
-            perror("Error en realloc");
-            close(client_fd);
-            return NULL;
-        }
+        // Processar la comanda rebuda a la trama
+        printF("Trama rebuda: ");
+        printF(data);
+        printF("\n");
 
-        // Copiem les dades noves al buffer
-        memcpy(buffer + totalBytes - bytesLeidos, tmpBuffer, bytesLeidos);
-        buffer[totalBytes] = '\0'; // Afegim el caràcter de final de cadena
-
-        // Mostrem el missatge rebut
-        printf("Missatge rebut (%ld bytes): %s\n", totalBytes, buffer);
-
-        // Lògica de processament de la trama aquí...
-        // Per exemple, podríem afegir processament de trames, respostes, etc.
-
-        // Alliberem el buffer després de cada processament
-        free(buffer);
-        buffer = NULL;
-        totalBytes = 0;  // Restablim totalBytes després del processament
+        // Crida a processCommandInGotham per gestionar la comanda
+        processCommandInGotham(data, client_fd);
     }
 
-    close(client_fd);
+    close(client_fd); // Tanquem la connexió amb el client
     return NULL;
 }
 
-/***********************************************
-* @Finalitat: Bucle principal que accepta connexions entrants i crea un fil per a cada connexió.
-* @Paràmetres:
-*   in: server_fd = descriptor del servidor per a acceptar connexions.
-* @Retorn: ----
-************************************************/
-/***********************************************
-* @Finalitat: Bucle principal que accepta connexions entrants i crea un fil per a cada connexió.
-* @Paràmetres:
-*   in: arg = descriptor del servidor passat com a `void *`.
-* @Retorn: ----
-************************************************/
-void *esperarConexiones(void *arg) {
-    int server_fd = *(int *)arg;
-    struct sockaddr_in direccionCliente;
-    socklen_t tamanoDireccion = sizeof(direccionCliente);
-
-    while (1) {
-        int *client_fd = malloc(sizeof(int)); // Punter a un descriptor de client
-        if (client_fd == NULL) {
-            perror("Error en malloc per client_fd");
-            pthread_exit(NULL); // Salir del hilo en caso de error
-        }
-
-        // Acceptar una connexió entrant
-        *client_fd = accept(server_fd, (struct sockaddr *)&direccionCliente, &tamanoDireccion);
-        if (*client_fd < 0) {
-            perror("Error en accept");
-            free(client_fd);
-            continue;
-        }
-
-        // Mostrar la IP i port del client connectat
-        char ipCliente[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &(direccionCliente.sin_addr), ipCliente, INET_ADDRSTRLEN);
-        printf("Connexió acceptada de %s:%d\n", ipCliente, ntohs(direccionCliente.sin_port));
-
-        // Crear un nou fil per gestionar la connexió
-        pthread_t thread_fd;
-        if (pthread_create(&thread_fd, NULL, gestionarConexion, client_fd) != 0) {
-            perror("Error en crear el fil");
-            close(*client_fd);
-            free(client_fd);
-        }
-
-        // Desvincular el fil perquè no bloquegi els recursos després d'acabar
-        pthread_detach(thread_fd);
-    }
-    pthread_exit(NULL); // Salir correctamente del hilo
-}
-
 //FASE1
-
-// Funció per llegir el fitxer de configuració de Gotham
-/***********************************************
-* @Finalitat: Llegeix el fitxer de configuració especificat i emmagatzema la informació a la estructura GothamConfig.
-* @Paràmetres:
-*   in: configFile = nom del fitxer de configuració.
-*   out: gothamConfig = estructura on s'emmagatzema la configuració llegida.
-* @Retorn: ----
-************************************************/
-void readConfigFile(const char *configFile, GothamConfig *gothamConfig) {
-    int fd = open(configFile, O_RDONLY); // Obre el fitxer en mode només lectura
-    
-    if (fd == -1) {
-        printF("Error obrint el fitxer de configuració\n"); // Missatge d'error si no es pot obrir
-        exit(1); // Finalitza el programa en cas d'error
-    }
-
-    // Llegeix i assigna memòria per a cada camp de la configuració
-    gothamConfig->ipFleck = readUntil(fd, '\n'); // Llegeix la IP del servidor Fleck
-    gothamConfig->ipFleck = trim(gothamConfig->ipFleck);  // Elimina espacios en blanco
-    char* portFleck = readUntil(fd, '\n'); // Llegeix el port com a cadena
-    gothamConfig->portFleck = atoi(portFleck); // Converteix el port a enter
-    free(portFleck); // Allibera la memòria de la cadena temporal
-
-    gothamConfig->ipHarEni = readUntil(fd, '\n'); // Llegeix la IP del servidor Harley Enigma
-    gothamConfig->ipHarEni = trim(gothamConfig->ipHarEni);  // Elimina espacios en blanco
-    char *portHarEni = readUntil(fd, '\n'); // Llegeix el port com a cadena
-    gothamConfig->portHarEni = atoi(portHarEni); // Converteix el port a enter
-    free(portHarEni); // Allibera la memòria de la cadena temporal
-
-    close(fd); // Tanca el fitxer
-
-    // Mostra la configuració llegida per a verificació
-    printF("IP Fleck - ");
-    printF(gothamConfig->ipFleck);
-    printF("\nPort Fleck - ");
-    char* portFleckStr = NULL;
-    asprintf(&portFleckStr, "%d", gothamConfig->portFleck); // Converteix el port a cadena de text
-    printF(portFleckStr);
-    free(portFleckStr); // Allibera la memòria de la cadena temporal
-
-    printF("\nIP Harley Enigma - ");
-    printF(gothamConfig->ipHarEni);
-    printF("\nPort Harley Enigma - ");
-    char* portHarEniStr = NULL;
-    asprintf(&portHarEniStr, "%d\n", gothamConfig->portHarEni); // Converteix el port a cadena de text
-    printF(portHarEniStr);
-    free(portHarEniStr); // Allibera la memòria de la cadena temporal
-}
-
 // Funció per alliberar la memòria dinàmica utilitzada per la configuració de Gotham
 /***********************************************
 * @Finalitat: Allibera la memòria dinàmica associada amb l'estructura GothamConfig.
@@ -213,12 +176,7 @@ void alliberarMemoria(GothamConfig *gothamConfig) {
 }
 
 int main(int argc, char *argv[]) {
-    // Crea la variable local para la configuración de Gotham
-    GothamConfig *gothamConfig = (GothamConfig *)malloc(sizeof(GothamConfig));
-    if (!gothamConfig) {
-        perror("Error en malloc para gothamConfig");
-        return 1;
-    }
+    GothamConfig *gothamConfig = malloc(sizeof(GothamConfig));
 
     if (argc != 2) {
         printF("Ús: ./gotham <fitxer de configuració>\n");
@@ -226,8 +184,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Leer el archivo de configuración
-    readConfigFile(argv[1], gothamConfig);
+    if (!gothamConfig) {
+        printF("Error assignant memòria per a la configuració\n");
+        return 1;
+    }
+
+    readConfigFileGeneric(argv[1], gothamConfig, CONFIG_GOTHAM);
 
     // Configura y crea el primer socket del servidor (Fleck)
     int server_fd_fleck = startServer(gothamConfig->ipFleck, gothamConfig->portFleck);

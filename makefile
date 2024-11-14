@@ -36,6 +36,19 @@ Enigma.exe: Enigma.c FileReader.c StringUtils.c DataConversion.c Networking.c
 Gotham.exe: Gotham.c FileReader.c StringUtils.c DataConversion.c Networking.c
 	$(CC) $(CFLAGS) Gotham.c FileReader.c StringUtils.c DataConversion.c Networking.c -o Gotham.exe
 
+# Regles per executar automàticament cada programa amb el fitxer de configuració corresponent
+Fleck: Fleck.exe
+	./Fleck.exe config_fleck.dat
+
+Harley: Harley.exe
+	./Harley.exe config_harley.dat
+
+Enigma: Enigma.exe
+	./Enigma.exe config_enigma.dat
+
+Gotham: Gotham.exe
+	./Gotham.exe config_gotham.dat
+
 # Neteja els fitxers generats
 clean:
 	rm -f *.exe

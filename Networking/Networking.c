@@ -8,6 +8,11 @@
 #include "StringUtils.h"
 
 int connect_to_server(const char *ip, int port) {
+    if (ip == NULL) {
+        printF("Error: IP NULL\n");
+        return -1;
+    }
+
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
         perror("Error creant el socket");
@@ -105,7 +110,7 @@ int send_frame(int socket_fd, const char *data, int data_length) {
     get_timestamp(timestamp);
 
     // Preparar la trama
-    snprintf(frame, FRAME_SIZE, "%s|%d|%s|%s", timestamp, data_length, checksum, data);
+    snprintf(frame, FRAME_SIZE, "%d|%s|%s|%s", data_length, data, checksum, timestamp);
 
     // Enviar la trama
     if (write(socket_fd, frame, FRAME_SIZE) < 0) {
@@ -116,14 +121,51 @@ int send_frame(int socket_fd, const char *data, int data_length) {
     return 0;
 }
 
-// Rep una trama del socket
-int receive_frame(int socket_fd, char *buffer) {
-    if (read(socket_fd, buffer, FRAME_SIZE) < 0) {
-        perror("Error rebent la trama");
-        return -1;
+// Rep una trama del socket 
+int receive_frame(int socket_fd, char *data, int *data_length) {
+    char frame[FRAME_SIZE];                // Emmagatzema la trama completa rebuda des del socket
+    char received_checksum[CHECKSUM_SIZE]; // Emmagatzema el checksum rebut en la trama
+    char timestamp[TIMESTAMP_SIZE];        // Emmagatzema el timestamp rebut en la trama
+    char *token;                           // Punter per dividir la trama en tokens
+    int received_length;                   // Variable temporal per a la longitud de les dades rebudes
+
+    // Llegeix la trama completa des del socket
+    if (read(socket_fd, frame, FRAME_SIZE) <= 0) {
+        printF("Error en rebre la trama\n"); // Missatge d'error si la lectura falla
+        return -1;                          
     }
+
+    token = strtok(frame, "|"); //Camp DATA_LENGTH
+    if (token == NULL) return -1;
+    received_length = atoi(token); // Converteix DATA_LENGTH de cadena a enter
+    *data_length = received_length; // Emmagatzema la longitud de les dades en el punter rebut
+
+    token = strtok(NULL, "|"); //Camp DATA
+    if (token == NULL) return -1;
+    strncpy(data, token, received_length);    // Copia DATA en el buffer de dades
+    data[received_length] = '\0';             
+
+    token = strtok(NULL, "|"); // Tercer camp: CHECKSUM
+    if (token == NULL) return -1;
+    strncpy(received_checksum, token, CHECKSUM_SIZE); // Copia CHECKSUM en received_checksum
+    received_checksum[CHECKSUM_SIZE - 1] = '\0';     
+
+    token = strtok(NULL, "|"); // Quart camp: TIMESTAMP
+    if (token == NULL) return -1;
+    strncpy(timestamp, token, TIMESTAMP_SIZE); // Copia TIMESTAMP en la variable timestamp
+    timestamp[TIMESTAMP_SIZE - 1] = '\0';     
+
+    // Validació del checksum
+    char calculated_checksum[CHECKSUM_SIZE];
+    calculate_checksum(data, received_length, calculated_checksum); // Calcula el checksum del DATA
+    if (strcmp(calculated_checksum, received_checksum) != 0) { // Compara el checksum calculat i rebut
+        printF("Error: Checksum invàlid en la trama\n");      
+        return -1;                                           
+    }
+
     return 0;
 }
+
 
 // Calcula el checksum d'una cadena de caràcters
 int calculate_checksum(const char *data, int data_length, char *checksum) {
