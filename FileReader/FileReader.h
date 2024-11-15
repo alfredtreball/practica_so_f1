@@ -1,7 +1,6 @@
 // FileReader.h
 #ifndef FILEREADER_H
 #define FILEREADER_H
-
 #define _GNU_SOURCE
 #define printF(x) write(1, x, strlen(x))
 

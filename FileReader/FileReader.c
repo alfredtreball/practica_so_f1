@@ -6,8 +6,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+
 #include "FileReader.h"
-#include "StringUtils.h" // Incluye trim()
+#include "StringUtils.h" //trim()
 
 #define printF(x) write(1, x, strlen(x))
 

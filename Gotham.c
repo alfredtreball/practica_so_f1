@@ -6,11 +6,7 @@
 * @Assignatura: Sistemes Operatius
 * @Curs: 2024-2025
 * 
-* @Descripció: Aquest fitxer implementa la gestió de configuració per al sistema 
-* Gotham. Inclou funcions per a llegir la configuració des d'un fitxer, 
-* emmagatzemar la informació en una estructura de dades i alliberar la memòria 
-* dinàmica associada. La configuració inclou informació de les connexions 
-* amb els servidors Fleck i Harley Enigma.
+* @Descripció: Implementació de Gotham per gestionar connexions i processar comandes.
 ************************************************/
 #define _GNU_SOURCE // Necessari per a que 'asprintf' funcioni correctament
 
@@ -19,235 +15,381 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <arpa/inet.h>  // Para sockets (INET)
-#include <sys/socket.h> // Para funciones de sockets
-#include <netinet/in.h> // Para estructura sockaddr_in
-#include <pthread.h> // Necesario para hilos
+#include <arpa/inet.h>  // Per a la comunicació de xarxa
+#include <sys/socket.h> // Funcions per a sockets
+#include <netinet/in.h> // Estructura sockaddr_in
+#include <pthread.h>    // Per treballar amb fils
 
-#include "FileReader.h"
-#include "StringUtils.h"
-#include "Networking.h"
+#include "FileReader/FileReader.h"
+#include "StringUtils/StringUtils.h"
+#include "DataConversion/DataConversion.h"
+#include "Networking/Networking.h"
 
-//FASE2
+// Representa un worker que es connecta a Gotham
+typedef struct {
+    char ip[16];    // Direcció IP del worker
+    int port;       // Port del worker
+    char type[10];  // Tipus de worker: "TEXT" o "MEDIA"
+    int socket_fd; // Descriptor del socket associat al worker
+} WorkerInfo;
+
+// Administra una llista dinàmica de workers registrats
+typedef struct {
+    WorkerInfo *workers;        // Llista dinàmica de workers
+    int workerCount;            // Nombre de workers registrats
+    int capacity;               // Capacitat actual de la llista
+    pthread_mutex_t mutex;      // Mutex per sincronitzar l'accés als workers
+} WorkerManager;
+
+// Declaració de funcions
 void *gestionarConexion(void *arg);
-/***********************************************
-* @Finalitat: Bucle principal que accepta connexions entrants i crea un fil per a cada connexió.
-* @Paràmetres:
-*   in: arg = descriptor del servidor passat com a `void *`.
-*   in: server_fd = descriptor del servidor per a acceptar connexions.
-* @Retorn: ----
-************************************************/
-void *esperarConexiones(void *arg) {
-    // Descriptors de socket per a Fleck, Enigma i Harley (assumeix que es passen al struct de l’argument)
-    int server_fd_fleck = ((int *)arg)[0];  
-    int server_fd_enigma = ((int *)arg)[1]; 
-    int server_fd_harley = ((int *)arg)[2]; 
+void *esperarConexiones(void *arg);
+void processCommandInGotham(const char *command, int client_fd, WorkerManager *manager);
+void registrarWorker(const char *payload, WorkerManager *manager, int client_fd);
+int buscarWorker(const char *type, WorkerManager *manager, char *ip, int *port);
+int logoutWorkerBySocket(int socket_fd, WorkerManager *manager);
+void alliberarMemoria(GothamConfig *gothamConfig);
 
-    // Conjunt de descriptors per utilitzar amb select()
-    fd_set read_fds;
-    
-    // Selecciona el descriptor més gran entre els tres sockets per indicar-lo a select()
-    int max_fd = server_fd_fleck;
-    if (server_fd_enigma > max_fd) max_fd = server_fd_enigma;
-    if (server_fd_harley > max_fd) max_fd = server_fd_harley;
-
-    while (1) {
-        // Inicialitza el conjunt de descriptors abans d’afegir-hi nous
-        FD_ZERO(&read_fds);
-        FD_SET(server_fd_fleck, &read_fds);   // Afegeix el socket de Fleck
-        FD_SET(server_fd_enigma, &read_fds);  // Afegeix el socket d’Enigma
-        FD_SET(server_fd_harley, &read_fds);  // Afegeix el socket de Harley
-
-        // select() espera que un dels descriptors estigui llest per operar
-        int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
-        if (activity < 0) { 
-            perror("Error en select"); // Mostra un missatge d’error si select() falla
-            continue; 
-        }
-
-        // Gestiona les connexions segons el socket que activi l'activitat
-        
-        // Comprova si hi ha activitat en el socket de Fleck
-        if (FD_ISSET(server_fd_fleck, &read_fds)) {
-            int *client_fd = malloc(sizeof(int));
-            *client_fd = accept(server_fd_fleck, NULL, NULL);
-            if (*client_fd >= 0) {
-                pthread_t fleck_thread;
-                pthread_create(&fleck_thread, NULL, gestionarConexion, client_fd); 
-                pthread_detach(fleck_thread);
-            }
-        }
-
-        // Comprova si hi ha activitat en el socket d’Enigma
-        if (FD_ISSET(server_fd_enigma, &read_fds)) {
-            int *client_fd = malloc(sizeof(int));
-            *client_fd = accept(server_fd_enigma, NULL, NULL);
-            if (*client_fd >= 0) {
-                pthread_t enigma_thread;
-                pthread_create(&enigma_thread, NULL, gestionarConexion, client_fd);
-                pthread_detach(enigma_thread);
-            }
-        }
-
-        // Comprova si hi ha activitat en el socket de Harley
-        if (FD_ISSET(server_fd_harley, &read_fds)) {
-            int *client_fd = malloc(sizeof(int));
-            *client_fd = accept(server_fd_harley, NULL, NULL);
-            if (*client_fd >= 0) {
-                pthread_t harley_thread;
-                pthread_create(&harley_thread, NULL, gestionarConexion, client_fd);
-                pthread_detach(harley_thread);
-            }
-        }
+WorkerManager *createWorkerManager() {
+    WorkerManager *manager = malloc(sizeof(WorkerManager)); // Reserva memòria per al WorkerManager.
+    if (!manager) {
+        perror("Error inicialitzant WorkerManager");
+        exit(EXIT_FAILURE); // Termina el programa si hi ha error de memòria.
     }
-    return NULL;
+
+    manager->capacity = 10; // Capacitat inicial de 10 workers.
+    manager->workerCount = 0; // Cap worker inicialment.
+    manager->workers = malloc(manager->capacity * sizeof(WorkerInfo)); // Reserva memòria per als workers.
+    if (!manager->workers) {
+        perror("Error inicialitzant la llista de workers");
+        free(manager); // Allibera la memòria si hi ha error amb la llista.
+        exit(EXIT_FAILURE);
+    }
+    pthread_mutex_init(&manager->mutex, NULL); // Inicialitza el mutex per gestionar accessos simultanis.
+    return manager;
 }
 
-void processCommandInGotham(const char *command, int client_fd) {
-    printF("Trama rebuda correctament a Gotham: ");
-    printF(command);
-    printF("\n");
-
-    if (strcmp(command, "CONNECT") == 0) {
-        // Registra la connexió
-        printF("Client connectat\n");
-        send_frame(client_fd, "ACK", 2);  // Envia resposta de confirmació
-    } 
-    else if (strncmp(command, "DISTORT", 7) == 0) {
-        printF("Processant comanda DISTORT\n");
-
-        // Confirma que DISTORT ha estat rebut i processat
-        send_frame(client_fd, "ACK DISTORT", 10);
-    } 
-    else if (strcmp(command, "CHECK STATUS") == 0) {
-        printF("Comprovant estat actual\n");
-        send_frame(client_fd, "STATUS OK ACK", 12); 
-    } 
-    else if (strcmp(command, "CLEAR ALL") == 0) {
-        printF("Processant comanda CLEAR ALL\n");
-
-        // Confirma que CLEAR ALL ha estat rebut i processat
-        send_frame(client_fd, "ACK CLEAR ALL", 13);
-    } 
-    else {
-        // Comanda desconeguda
-        send_frame(client_fd, "ERROR: Comanda desconeguda", 26);
+void freeWorkerManager(WorkerManager *manager) {
+    if (manager) {
+        free(manager->workers); // Allibera la memòria per a la llista de workers.
+        pthread_mutex_destroy(&manager->mutex); // Destrueix el mutex.
+        free(manager); // Allibera el `WorkerManager`.
     }
 }
 
 /***********************************************
-* @Finalitat: Gestiona les connexions entrants de Fleck, Enigma o Harley.
-* Cada connexió es tracta en un fil separat, on es reben trames i es processa la comanda.
+* @Finalitat: Gestiona la connexió amb un client (Fleck, Harley o Enigma).
+* Cada connexió es tracta en un fil separat. Rep trames i les processa.
 * @Paràmetres:
-*   in: arg = punter a un descriptor de fitxer del client (client_fd).
-* @Retorn: ----
+*   in: arg = punter a la informació de connexió i al WorkerManager.
+* @Retorn: NULL
 ************************************************/
 void *gestionarConexion(void *arg) {
-    int client_fd = *(int *)arg; // Descriptor de fitxer del client
-    free(arg); // Alliberem la memòria assignada a l'argument
+    // Obtenim el descriptor del socket i el punter a WorkerManager
+    int client_fd = *(int *)arg;
+    WorkerManager *manager = *((WorkerManager **)((int *)arg + 1));
 
-    char data[FRAME_SIZE]; // Buffer per emmagatzemar les dades de la trama
-    int data_length;       // Longitud de les dades rebudes
+    free(arg); // Alliberem només l'espai assignat per `arg`, no `manager`.
 
-    while (1) {
-        // Recepció de la trama
-        if (receive_frame(client_fd, data, &data_length) < 0) {
-            printF("Error rebent la trama o client desconnectat\n");
-            break; // Si hi ha un error, es tanca la connexió
-        }
-
-        // Processar la comanda rebuda a la trama
-        printF("Trama rebuda: ");
-        printF(data);
-        printF("\n");
-
-        // Crida a processCommandInGotham per gestionar la comanda
-        processCommandInGotham(data, client_fd);
+    char frame[FRAME_SIZE];
+    while (read(client_fd, frame, FRAME_SIZE) > 0) {
+        processCommandInGotham(frame, client_fd, manager); // Processa les comandes rebudes.
     }
 
-    close(client_fd); // Tanquem la connexió amb el client
+    // Si el client es desconnecta o hi ha un error, elimina el worker.
+    pthread_mutex_lock(&manager->mutex);
+    logoutWorkerBySocket(client_fd, manager);
+    pthread_mutex_unlock(&manager->mutex);
+
+    close(client_fd); // Tanca la connexió amb el client.
     return NULL;
 }
 
-//FASE1
-// Funció per alliberar la memòria dinàmica utilitzada per la configuració de Gotham
 /***********************************************
-* @Finalitat: Allibera la memòria dinàmica associada amb l'estructura GothamConfig.
+* @Finalitat: Accepta connexions entrants i crea un fil per a cada connexió.
+* Utilitza `select` per gestionar múltiples sockets de forma concurrent.
 * @Paràmetres:
-*   in: gothamConfig = estructura GothamConfig a alliberar.
+*   in: arg = descriptors dels sockets del servidor.
+* @Retorn: NULL
+************************************************/
+void *esperarConexiones(void *arg) { //Utilitzem select() per gestionar tres sockets diferents, connexions amb fleck, harley i enigma
+
+    int *server_fds = (int *)arg; // Descriptors dels sockets (Fleck, Enigma, Harley)
+    int server_fd_fleck = server_fds[0];
+    int server_fd_enigma = server_fds[1];
+    int server_fd_harley = server_fds[2];
+
+    // Crear un conjunt de descriptors per `select`
+    fd_set read_fds;
+    int max_fd = server_fd_fleck > server_fd_enigma ? server_fd_fleck : server_fd_enigma;
+    if (server_fd_harley > max_fd) max_fd = server_fd_harley;
+
+    // Inicialitzar el WorkerManager
+    WorkerManager *manager = createWorkerManager();
+
+    while (1) {
+        FD_ZERO(&read_fds); // Reinicialitza el conjunt de descriptors
+        FD_SET(server_fd_fleck, &read_fds);
+        FD_SET(server_fd_enigma, &read_fds);
+        FD_SET(server_fd_harley, &read_fds);
+
+        // Espera connexions o dades noves
+        int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+        if (activity < 0) {
+            perror("Error en select");
+            continue;
+        }
+
+       // Gestiona connexions de Fleck
+        if (FD_ISSET(server_fd_fleck, &read_fds)) {
+            int *client_fd = malloc(sizeof(int) + sizeof(WorkerManager *));
+            *client_fd = accept(server_fd_fleck, NULL, NULL);
+            if (*client_fd >= 0) {
+                memcpy(client_fd + 1, &manager, sizeof(WorkerManager *));
+                pthread_t thread;
+                pthread_create(&thread, NULL, gestionarConexion, client_fd);
+                pthread_detach(thread);
+            } else {
+                free(client_fd);
+            }
+        }
+
+        // Gestiona connexions de Enigma
+        if (FD_ISSET(server_fd_enigma, &read_fds)) {
+            int *client_fd = malloc(sizeof(int) + sizeof(WorkerManager *));
+            *client_fd = accept(server_fd_enigma, NULL, NULL);
+            if (*client_fd >= 0) {
+                memcpy(client_fd + 1, &manager, sizeof(WorkerManager *));
+                pthread_t thread;
+                pthread_create(&thread, NULL, gestionarConexion, client_fd);
+                pthread_detach(thread);
+            } else {
+                free(client_fd);
+            }
+        }
+
+        // Gestiona connexions de Harley
+        if (FD_ISSET(server_fd_harley, &read_fds)) {
+            int *client_fd = malloc(sizeof(int) + sizeof(WorkerManager *));
+            *client_fd = accept(server_fd_harley, NULL, NULL);
+            if (*client_fd >= 0) {
+                memcpy(client_fd + 1, &manager, sizeof(WorkerManager *));
+                pthread_t thread;
+                pthread_create(&thread, NULL, gestionarConexion, client_fd);
+                pthread_detach(thread);
+            } else {
+                free(client_fd);
+            }
+        }
+    }
+
+    // Alliberar recursos del WorkerManager
+    freeWorkerManager(manager);
+    return NULL;
+}
+
+/***********************************************
+* @Finalitat: Processa una comanda rebuda a Gotham.
+* Identifica el tipus de comanda i executa les accions corresponents.
+* @Paràmetres:
+*   in: command = la comanda rebuda.
+*   in: client_fd = descriptor del client que ha enviat la comanda.
+*   in: manager = punter al WorkerManager.
+* @Retorn: ----
+************************************************/
+void processCommandInGotham(const char *command, int client_fd, WorkerManager *manager) {
+     // Feu una còpia de la comanda perquè strtok la modificarà
+    char *commandCopy = strdup(command);
+    if (!commandCopy) {
+        perror("Error duplicant la comanda");
+        send_frame(client_fd, "ERROR COMMAND", 13);
+        return;
+    }
+
+    // Separar la comanda per camps utilitzant '|'
+    char *token = strtok(commandCopy, "|"); // Primer camp (id)
+    token = strtok(NULL, "|"); // Segon camp (comanda)
+    
+    // Verificar que s'ha obtingut la comanda
+    if (token == NULL) {
+        free(commandCopy);
+        send_frame(client_fd, "ERROR COMMAND", 13);
+        return;
+    }
+    
+    printf("Comanda rebuda: '%s'\n", command);
+    trimCommand((char *)command); // Elimina espais i salts de línia
+    if (strcasecmp(command, "CONNECT") == 0) {
+        send_frame(client_fd, "ACK", 3); // Confirma la connexió
+    } else if (strncasecmp(command, "DISTORT", 7) == 0) {
+        char fileName[100];
+
+        // Parsejar manualment la comanda per obtenir els paràmetres
+        char *rest = (char *)command + 8; // Saltar "DISTORT "
+        char *token = strtok(rest, " ");
+        if (token) {
+            strncpy(fileName, token, sizeof(fileName));
+        }
+
+        char ip[16];
+        int port;
+        pthread_mutex_lock(&manager->mutex); // Bloqueja l'accés al WorkerManager
+        int result = buscarWorker("MEDIA", manager, ip, &port);
+        pthread_mutex_unlock(&manager->mutex);
+
+        if (result == 0) {
+            char response[256];
+            snprintf(response, sizeof(response), "DISTORT_OK %s:%d", ip, port);
+            send_frame(client_fd, response, strlen(response));
+        } else {
+            send_frame(client_fd, "DISTORT_KO", 10);
+        }
+    } else if (strcasecmp(command, "CHECK STATUS") == 0) {
+        send_frame(client_fd, "STATUS OK ACK", 13);
+    } else if (strcasecmp(command, "CLEAR ALL") == 0) {
+        send_frame(client_fd, "ACK CLEAR ALL", 13);
+    } else if (strncasecmp(command, "LOGOUT", 6) == 0) { // Canviat a `strncmp`
+        // Gestionar el LOGOUT del Fleck
+        send_frame(client_fd, "ACK LOGOUT", 10); // Confirmar el LOGOUT
+        close(client_fd); // Tanquem el socket del Fleck
+        printf("Fleck desconnectat: socket_fd=%d\n", client_fd);
+    } else {
+        send_frame(client_fd, "ERROR COMMAND", 13);
+    }
+}
+
+/***********************************************
+* @Finalitat: Registra un nou worker a Gotham.
+* @Paràmetres:
+*   in: payload = informació del worker (IP, port, tipus).
+*   in: manager = punter al WorkerManager.
+*   in: client_fd = descriptor del client associat.
+* @Retorn: ----
+************************************************/
+void registrarWorker(const char *payload, WorkerManager *manager, int client_fd) {
+    char ip[16] = {0}, type[10] = {0};
+    int port = 0;
+
+    // Parsejar la informació del payload utilitzant strtok
+    char *payloadCopy = strdup(payload); // Feu una còpia per no modificar l'original
+    if (!payloadCopy) {
+        perror("Error duplicant el payload");
+        return;
+    }
+
+    char *token = strtok(payloadCopy, " ");
+    if (token) {
+        strncpy(ip, token, sizeof(ip) - 1);
+        token = strtok(NULL, " ");
+        if (token) {
+            port = atoi(token); // Convertir el port en un número
+            token = strtok(NULL, " ");
+            if (token) {
+                strncpy(type, token, sizeof(type) - 1);
+            }
+        }
+    }
+    free(payloadCopy); // Allibera la memòria de la còpia
+
+    pthread_mutex_lock(&manager->mutex);
+
+    // Comprovar si cal ampliar la capacitat
+    if (manager->workerCount == manager->capacity) {
+        manager->capacity *= 2; // Duplicar la capacitat
+        WorkerInfo *newWorkers = realloc(manager->workers, manager->capacity * sizeof(WorkerInfo));
+        if (!newWorkers) {
+            perror("Error ampliant la llista de workers");
+            pthread_mutex_unlock(&manager->mutex);
+            return;
+        }
+        manager->workers = newWorkers;
+    }
+
+    // Afegir el nou worker
+    WorkerInfo *worker = &manager->workers[manager->workerCount++];
+    strncpy(worker->ip, ip, sizeof(worker->ip));
+    worker->port = port;
+    strncpy(worker->type, type, sizeof(worker->type));
+    worker->socket_fd = client_fd;
+
+    pthread_mutex_unlock(&manager->mutex);
+}
+
+/***********************************************
+* @Finalitat: Busca un worker disponible segons el tipus.
+* @Paràmetres:
+*   in: type = tipus de worker (TEXT o MEDIA).
+*   in: manager = punter al WorkerManager.
+*   out: ip = IP del worker trobat.
+*   out: port = port del worker trobat.
+* @Retorn: 0 si trobat, -1 si no trobat.
+************************************************/
+int buscarWorker(const char *type, WorkerManager *manager, char *ip, int *port) {
+    for (int i = 0; i < manager->workerCount; i++) {
+        if (strcmp(manager->workers[i].type, type) == 0) {
+            strncpy(ip, manager->workers[i].ip, 16);
+            *port = manager->workers[i].port;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/***********************************************
+* @Finalitat: Elimina un worker pel seu socket_fd.
+************************************************/
+int logoutWorkerBySocket(int socket_fd, WorkerManager *manager) {
+    pthread_mutex_lock(&manager->mutex);
+    for (int i = 0; i < manager->workerCount; i++) {
+        if (manager->workers[i].socket_fd == socket_fd) {
+            manager->workers[i] = manager->workers[--manager->workerCount];
+            pthread_mutex_unlock(&manager->mutex);
+            return 0; // Worker eliminat correctament
+        }
+    }
+    pthread_mutex_unlock(&manager->mutex);
+    return -1; // Worker no trobat
+}
+
+/***********************************************
+* @Finalitat: Allibera la memòria dinàmica utilitzada per GothamConfig.
+* @Paràmetres:
+*   in: gothamConfig = estructura de configuració.
 * @Retorn: ----
 ************************************************/
 void alliberarMemoria(GothamConfig *gothamConfig) {
-    if (gothamConfig->ipFleck) {
-        free(gothamConfig->ipFleck); // Allibera la memòria de la IP Fleck
-    }
-    if (gothamConfig->ipHarEni) {
-        free(gothamConfig->ipHarEni); // Allibera la memòria de la IP Harley Enigma
-    }
-    free(gothamConfig); // Finalment, allibera la memòria de l'estructura principal
+    if (gothamConfig->ipFleck) free(gothamConfig->ipFleck);
+    if (gothamConfig->ipHarEni) free(gothamConfig->ipHarEni);
+    free(gothamConfig);
 }
 
+/***********************************************
+* @Finalitat: Funció principal del programa Gotham.
+************************************************/
 int main(int argc, char *argv[]) {
-    GothamConfig *gothamConfig = malloc(sizeof(GothamConfig));
-
     if (argc != 2) {
-        printF("Ús: ./gotham <fitxer de configuració>\n");
-        free(gothamConfig);  // Liberar memoria en caso de error
+        printf("Ús: ./gotham <fitxer de configuració>\n");
         return 1;
     }
 
-    if (!gothamConfig) {
-        printF("Error assignant memòria per a la configuració\n");
+    GothamConfig *config = malloc(sizeof(GothamConfig));
+    if (!config) {
+        printf("Error assignant memòria.\n");
         return 1;
     }
 
-    readConfigFileGeneric(argv[1], gothamConfig, CONFIG_GOTHAM);
+    readConfigFileGeneric(argv[1], config, CONFIG_GOTHAM);
 
-    // Configura y crea el primer socket del servidor (Fleck)
-    int server_fd_fleck = startServer(gothamConfig->ipFleck, gothamConfig->portFleck);
-    if (server_fd_fleck < 0) {
-        printF("No se pudo iniciar el servidor para Fleck\n");
-        alliberarMemoria(gothamConfig);
-        return 1;
-    }
+    int server_fd_fleck = startServer(config->ipFleck, config->portFleck);
+    int server_fd_enigma = startServer(config->ipHarEni, config->portHarEni);
 
-    // Configura y crea el segundo socket del servidor (Harley/Enigma)
-    int server_fd_enigma = startServer(gothamConfig->ipHarEni, gothamConfig->portHarEni);
-    if (server_fd_enigma < 0) {
-        printF("No se pudo iniciar el servidor para Harley/Enigma\n");
-        close(server_fd_fleck);  // Cerrar el servidor Fleck antes de salir
-        alliberarMemoria(gothamConfig);
-        return 1;
-    }
+    int server_fds[3] = {server_fd_fleck, server_fd_enigma, -1};
+    pthread_t thread;
+    pthread_create(&thread, NULL, esperarConexiones, server_fds);
+    pthread_join(thread, NULL);
 
-    // Iniciar hilos para aceptar conexiones en ambos sockets
-    pthread_t fleck_thread, enigma_thread;
-
-    if (pthread_create(&fleck_thread, NULL, (void *(*)(void *))esperarConexiones, &server_fd_fleck) != 0) {
-        perror("Error creando el hilo para conexiones de Fleck");
-        close(server_fd_fleck);
-        close(server_fd_enigma);
-        alliberarMemoria(gothamConfig);
-        return 1;
-    }
-
-    if (pthread_create(&enigma_thread, NULL, (void *(*)(void *))esperarConexiones, &server_fd_enigma) != 0) {
-        perror("Error creando el hilo para conexiones de Harley/Enigma");
-        pthread_cancel(fleck_thread);  // Cancelar el hilo de Fleck en caso de error
-        close(server_fd_fleck);
-        close(server_fd_enigma);
-        alliberarMemoria(gothamConfig);
-        return 1;
-    }
-
-    // Esperar a que los hilos terminen
-    pthread_join(fleck_thread, NULL);
-    pthread_join(enigma_thread, NULL);
-
-    // Liberar recursos y memoria
     close(server_fd_fleck);
     close(server_fd_enigma);
-    alliberarMemoria(gothamConfig);
-
+    alliberarMemoria(config);
     return 0;
 }

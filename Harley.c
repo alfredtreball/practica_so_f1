@@ -20,9 +20,11 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include "FileReader.h"
-#include "StringUtils.h" // Inclou la funció esTipoValido
-#include "Networking.h" // Inclou la funció connect_to_server
+
+#include "FileReader/FileReader.h"
+#include "StringUtils/StringUtils.h"
+#include "DataConversion/DataConversion.h"
+#include "Networking/Networking.h"
 
 // Funció per alliberar la memòria dinàmica utilitzada per HarleyConfig
 void alliberarMemoria(HarleyConfig *harleyConfig) {
@@ -69,7 +71,9 @@ int main(int argc, char *argv[]) {
     // Bucle per rebre i processar peticions
     char buffer[FRAME_SIZE];
     while (1) {
-        if (receive_frame(gothamSocket, buffer) < 0) {
+        int data_length;  // Declara una variable para almacenar la longitud de los datos
+
+        if (receive_frame(gothamSocket, buffer, &data_length) < 0) {
             printF("Error rebent la petició de Gotham\n");
             break;
         }

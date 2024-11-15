@@ -15,39 +15,39 @@
 
 # Variables
 CC = gcc
-CFLAGS = -Wall -Wextra
+CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking
 
 # Objectius per compilar cada executable
 all: Fleck.exe Harley.exe Enigma.exe Gotham.exe
 
 # Compilació de Fleck
-Fleck.exe: Fleck.c FileReader.c StringUtils.c DataConversion.c Networking.c
-	$(CC) $(CFLAGS) Fleck.c FileReader.c StringUtils.c DataConversion.c Networking.c -o Fleck.exe
+Fleck.exe: Fleck.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c
+	$(CC) $(CFLAGS) Fleck.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c -o Fleck.exe
 
 # Compilació de Harley
-Harley.exe: Harley.c FileReader.c StringUtils.c DataConversion.c Networking.c
-	$(CC) $(CFLAGS) Harley.c FileReader.c StringUtils.c DataConversion.c Networking.c -o Harley.exe
+Harley.exe: Harley.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c
+	$(CC) $(CFLAGS) Harley.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c -o Harley.exe
 
 # Compilació de Enigma
-Enigma.exe: Enigma.c FileReader.c StringUtils.c DataConversion.c Networking.c
-	$(CC) $(CFLAGS) Enigma.c FileReader.c StringUtils.c DataConversion.c Networking.c -o Enigma.exe
+Enigma.exe: Enigma.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c
+	$(CC) $(CFLAGS) Enigma.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c -o Enigma.exe
 
 # Compilació de Gotham
-Gotham.exe: Gotham.c FileReader.c StringUtils.c DataConversion.c Networking.c
-	$(CC) $(CFLAGS) Gotham.c FileReader.c StringUtils.c DataConversion.c Networking.c -o Gotham.exe
+Gotham.exe: Gotham.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c
+	$(CC) $(CFLAGS) Gotham.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c -o Gotham.exe
 
 # Regles per executar automàticament cada programa amb el fitxer de configuració corresponent
 Fleck: Fleck.exe
-	./Fleck.exe config_fleck.dat
+	./Fleck.exe fitxers_configuració/config_fleck.dat
 
 Harley: Harley.exe
-	./Harley.exe config_harley.dat
+	./Harley.exe fitxers_configuració/config_harley.dat
 
 Enigma: Enigma.exe
-	./Enigma.exe config_enigma.dat
+	./Enigma.exe fitxers_configuració/config_enigma.dat
 
 Gotham: Gotham.exe
-	./Gotham.exe config_gotham.dat
+	./Gotham.exe fitxers_configuració/config_gotham.dat
 
 # Neteja els fitxers generats
 clean:

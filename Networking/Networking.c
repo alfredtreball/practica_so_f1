@@ -1,11 +1,12 @@
-#include "Networking.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <time.h>
-#include "StringUtils.h"
+
+#include "Networking.h"
+#include "StringUtils.h" //trim()
 
 int connect_to_server(const char *ip, int port) {
     if (ip == NULL) {

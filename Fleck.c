@@ -9,10 +9,10 @@
 #include <sys/wait.h>
 #include <signal.h>
 
-#include "FileReader.h"
-#include "StringUtils.h"
-#include "DataConversion.h"
-#include "Networking.h"
+#include "FileReader/FileReader.h"
+#include "StringUtils/StringUtils.h"
+#include "DataConversion/DataConversion.h"
+#include "Networking/Networking.h"
 
 FleckConfig *globalFleckConfig = NULL;
 
@@ -146,7 +146,9 @@ void processCommandWithGotham(const char *command, int gothamSocket) {
     }
 
     char buffer[FRAME_SIZE];
-    if (receive_frame(gothamSocket, buffer) < 0) {
+    int data_length;  // Asegurarse de definir el argumento extra
+
+    if (receive_frame(gothamSocket, buffer, &data_length) < 0) {  // Pasar tres argumentos
         printF("Error rebent la resposta de Gotham\n");
         return;
     }

@@ -29,6 +29,18 @@ int esTipoValido(const char *filename, const char *workerType) {
     return 0;
 }
 
+// Funció per "trimejar" espais en blanc i salts de línia
+void trimCommand(char *command) {
+    char *trimmed = trim(command); // Elimina espais al principi i al final
+    if (trimmed != command) {
+        memmove(command, trimmed, strlen(trimmed) + 1);
+    }
+
+    // Elimina caràcters no desitjats com '\n' explícitament
+    removeChar(command, '\n');
+    removeChar(command, '\r');
+}
+
 /***********************************************
 * @Finalitat: Elimina els espais en blanc que es troben al començament i al final de la cadena.
 * @Paràmetres:
