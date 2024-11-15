@@ -155,7 +155,7 @@ int receive_frame(int socket_fd, char *data, int *data_length) {
     strncpy(timestamp, token, TIMESTAMP_SIZE); // Copia TIMESTAMP en la variable timestamp
     timestamp[TIMESTAMP_SIZE - 1] = '\0';     
 
-    // Validació del checksum
+    //Validació del checksum
     char calculated_checksum[CHECKSUM_SIZE];
     calculate_checksum(data, received_length, calculated_checksum); // Calcula el checksum del DATA
     if (strcmp(calculated_checksum, received_checksum) != 0) { // Compara el checksum calculat i rebut
