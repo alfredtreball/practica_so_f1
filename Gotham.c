@@ -291,8 +291,7 @@ void *esperarConexiones(void *arg) { //Utilitzem select() per gestionar tres soc
 * @Retorn: ----
 ************************************************/
 void processCommandInGotham(const char *command, int client_fd, WorkerManager *manager) {
-
-     // Depuración del comando recibido
+    // Depuración del comando recibido
     printF("\033[34m[DEBUG]: Comando completo recibido: ");
     printF(command);
     printF("\033[0m\n");
@@ -312,10 +311,11 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
     printF("\033[34m[DEBUG]: Comando limpio: ");
     printF(cleanCommand);
     printF("\033[0m\n");
-    // Crear una còpia de la comanda perquè strtok modificarà la cadena
+
+    // Crear una copia del comando porque strtok modificará la cadena
     char *commandCopy = strdup(cleanCommand);
     if (!commandCopy) {
-        char *error_msg = strdup("\033[31m[ERROR]: Error duplicant la comanda\033[0m\n"); // Vermell
+        char *error_msg = strdup("\033[31m[ERROR]: Error duplicant la comanda\033[0m\n");
         if (error_msg) {
             printF(error_msg);
             free(error_msg);
@@ -324,10 +324,10 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
         return;
     }
 
-    // Separar la comanda en camps utilitzant '&'
-    char *token = strtok(commandCopy, "&");
+    // Separar la comanda en campos utilizando '&' o '|'
+    char *token = strtok(commandCopy, "&|");
     if (!token) {
-        char *warning_msg = strdup("\033[33m[WARNING]: Comanda rebuda sense contingut vàlid\033[0m\n"); // Groc
+        char *warning_msg = strdup("\033[33m[WARNING]: Comanda rebuda sense contingut vàlid\033[0m\n");
         if (warning_msg) {
             printF(warning_msg);
             free(warning_msg);
@@ -341,9 +341,9 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
     printF(token);
     printF("\033[0m\n");
 
-    // Analitzar i identificar el tipus de comanda
+    // Analizar e identificar el tipo de comando
     if (strcasecmp(token, "REGISTER WORKER") == 0) {
-        // Processar el registre del worker
+        // Procesar el registro del worker
         char *workerType = strtok(NULL, "&");
         char *workerIP = strtok(NULL, "&");
         char *workerPortStr = strtok(NULL, "&");
@@ -357,7 +357,7 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
 
         int workerPort = atoi(workerPortStr);
 
-        // Afegir el worker a la llista
+        // Añadir el worker a la lista
         pthread_mutex_lock(&manager->mutex);
         if (manager->workerCount == manager->capacity) {
             manager->capacity *= 2;
@@ -381,6 +381,7 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
 
         logSuccess("Worker registrat correctament.");
         send_frame(client_fd, "CON_OK", strlen("CON_OK"));
+
     } else if (strcasecmp(token, "CONNECT") == 0) {
         send_frame(client_fd, "ACK", strlen("ACK"));
         char *connect_msg = strdup("\033[32m[SUCCESS]: Client connectat correctament.\033[0m\n");
@@ -388,6 +389,7 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
             printF(connect_msg);
             free(connect_msg);
         }
+
     } else if (strcasecmp(token, "DISTORT") == 0) {
         // Comanda DISTORT
         char *fileName = strtok(NULL, "&");
@@ -430,6 +432,7 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
                 free(warning_msg);
             }
         }
+
     } else if (strcasecmp(token, "CHECK STATUS") == 0) {
         send_frame(client_fd, "STATUS OK ACK", strlen("STATUS OK ACK"));
         char *status_msg = strdup("\033[32m[SUCCESS]: Sol·licitud de CHECK STATUS processada.\033[0m\n");
@@ -437,6 +440,7 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
             printF(status_msg);
             free(status_msg);
         }
+
     } else if (strcasecmp(token, "CLEAR ALL") == 0) {
         send_frame(client_fd, "ACK CLEAR ALL", strlen("ACK CLEAR ALL"));
         char *clear_msg = strdup("\033[35m[INFO]: Sol·licitud de CLEAR ALL rebuda i processada.\033[0m\n");
@@ -444,6 +448,7 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
             printF(clear_msg);
             free(clear_msg);
         }
+
     } else if (strcasecmp(token, "LOGOUT") == 0) {
         pthread_mutex_lock(&manager->mutex);
         int result = logoutWorkerBySocket(client_fd, manager);
@@ -464,6 +469,7 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
                 free(error_msg);
             }
         }
+
     } else {
         send_frame(client_fd, "ERROR COMMAND", strlen("ERROR COMMAND"));
         char *unknown_msg = strdup("\033[31m[ERROR]: Comanda desconeguda rebuda.\033[0m\n");
@@ -473,8 +479,9 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
         }
     }
 
-    free(commandCopy); // Alliberar la memòria de la còpia
+    free(commandCopy); // Liberar memoria de la copia
 }
+
 
 
 

@@ -1,18 +1,3 @@
-/***********************************************
-* @Fitxer: Harley.c
-* @Autors: Pau Olea Reyes (pau.olea), Alfred Chávez Fernández (alfred.chavez)
-* @Estudis: Enginyeria Electrònica de Telecomunicacions
-* @Universitat: Universitat Ramon Llull - La Salle
-* @Assignatura: Sistemes Operatius
-* @Curs: 2024-2025
-* 
-* @Descripció: Aquest fitxer implementa les funcions per a la gestió de la 
-* configuració del sistema Harley. Inclou funcions per a llegir la configuració 
-* des d'un fitxer, emmagatzemar la informació en una estructura de dades, i 
-* alliberar la memòria dinàmica associada. La configuració inclou informació 
-* sobre les connexions amb els servidors Gotham i Fleck, així com informació 
-* del directori de treball i el tipus de treballador.
-************************************************/
 #define _GNU_SOURCE // Necessari per a que 'asprintf' funcioni correctament
 
 #include <stdio.h>
@@ -21,6 +6,16 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+// Colores para la salida
+#define RESET "\033[0m"
+#define RED "\033[31m"
+#define GREEN "\033[32m"
+#define YELLOW "\033[33m"
+#define CYAN "\033[36m"
+#define MAGENTA "\033[35m"
+#define BOLD "\033[1m"
+
+// Includes adicionales
 #include "FileReader/FileReader.h"
 #include "StringUtils/StringUtils.h"
 #include "DataConversion/DataConversion.h"
@@ -35,63 +30,102 @@ void alliberarMemoria(HarleyConfig *harleyConfig) {
     free(harleyConfig);
 }
 
+// Funció per imprimir missatges amb colors
+void printColor(const char *color, const char *message) {
+    write(1, color, strlen(color));
+    write(1, message, strlen(message));
+    write(1, RESET, strlen(RESET));
+    write(1, "\n", 1);
+}
+
 // Funció principal
-int main(int argc, char *argv[]) {   
+int main(int argc, char *argv[]) {
+    // Validació de l'entrada
     if (argc != 2) {
-        printF("Ús: ./harley <fitxer de configuració>\n");
+        printColor(RED, "[ERROR]: Ús correcte: ./harley <fitxer de configuració>");
         exit(1);
     }
+
+    printColor(CYAN, "[INFO]: Llegint el fitxer de configuració...");
 
     // Crea la variable local per a la configuració de Harley
     HarleyConfig *harleyConfig = (HarleyConfig *)malloc(sizeof(HarleyConfig));
     if (!harleyConfig) {
-        printF("Error assignant memòria per a la configuració\n");
+        printColor(RED, "[ERROR]: Error assignant memòria per a la configuració.");
         return 1;
     }
 
     readConfigFileGeneric(argv[1], harleyConfig, CONFIG_HARLEY);
 
+    // Mostrem la informació de configuració llegida
+    printColor(GREEN, "[SUCCESS]: Configuració carregada correctament.");
+    char *configMessage;
+    asprintf(&configMessage,
+             "[INFO]: IP Gotham: %s\n[INFO]: Port Gotham: %d\n[INFO]: Worker Type: %s\n[INFO]: IP Fleck: %s\n[INFO]: Port Fleck: %d",
+             harleyConfig->ipGotham, harleyConfig->portGotham, harleyConfig->workerType, harleyConfig->ipFleck, harleyConfig->portFleck);
+    printColor(CYAN, configMessage);
+    free(configMessage);
+
     // Connecta a Gotham
+    printColor(CYAN, "[INFO]: Connectant a Gotham...");
     int gothamSocket = connect_to_server(harleyConfig->ipGotham, harleyConfig->portGotham);
     if (gothamSocket < 0) {
-        printF("Error connectant a Gotham\n");
+        printColor(RED, "[ERROR]: No s'ha pogut connectar a Gotham.");
+        alliberarMemoria(harleyConfig);
+        return 1;
+    }
+    printColor(GREEN, "[SUCCESS]: Connectat correctament a Gotham!");
+
+    // Envia un missatge de registre com a treballador (amb format correcte)
+    char registerMessage[FRAME_SIZE];
+    snprintf(registerMessage, FRAME_SIZE, "REGISTER WORKER&%s&%s&%d",
+             harleyConfig->workerType, harleyConfig->ipFleck, harleyConfig->portFleck);
+    if (send_frame(gothamSocket, registerMessage, strlen(registerMessage)) < 0) {
+        printColor(RED, "[ERROR]: No s'ha pogut enviar el missatge de registre a Gotham.");
+        close(gothamSocket);
         alliberarMemoria(harleyConfig);
         return 1;
     }
 
-    // Envia un missatge de registre com a treballador
-    char registerMessage[FRAME_SIZE];
-    snprintf(registerMessage, FRAME_SIZE, "REGISTER WORKER %s", harleyConfig->workerType);
-    send_frame(gothamSocket, registerMessage, strlen(registerMessage));
+    printColor(GREEN, "[SUCCESS]: Worker registrat correctament a Gotham.");
+    
+    // Rebem la confirmació de registre
+    char buffer[FRAME_SIZE];
+    int data_length;
+    if (receive_frame(gothamSocket, buffer, &data_length) < 0) {
+        printColor(RED, "[ERROR]: No s'ha rebut la confirmació de registre des de Gotham.");
+        close(gothamSocket);
+        alliberarMemoria(harleyConfig);
+        return 1;
+    }
+    printColor(CYAN, "[INFO]: Confirmació de registre rebuda:");
 
-    printF("Registrat a Gotham com a worker de tipus: ");
-    printF(harleyConfig->workerType);
-    printF("\n");
+    if (strcmp(buffer, "CON_KO") == 0) {
+        printColor(RED, "[ERROR]: Gotham ha rebutjat el registre.");
+        close(gothamSocket);
+        alliberarMemoria(harleyConfig);
+        return 1;
+    }
+    printColor(GREEN, buffer);
 
     // Bucle per rebre i processar peticions
-    char buffer[FRAME_SIZE];
+    printColor(CYAN, "[INFO]: Esperant peticions de Gotham...");
     while (1) {
-        int data_length;  // Declara una variable para almacenar la longitud de los datos
-
         if (receive_frame(gothamSocket, buffer, &data_length) < 0) {
-            printF("Error rebent la petició de Gotham\n");
+            printColor(RED, "[ERROR]: Error rebent la petició de Gotham.");
             break;
         }
-        printF("Petició rebuda: ");
-        printF(buffer);
-        printF("\n");
 
-        //Verifiquem si és tipus media
         char *filename = buffer;
+        printColor(YELLOW, "[INFO]: Petició rebuda:");
+        printColor(MAGENTA, buffer);
 
+        // Verifiquem si és tipus media
         if (esTipoValido(filename, harleyConfig->workerType)) {
-            printF("Fitxer acceptat: ");
-            printF(filename);
-            printF("\n");
+            printColor(GREEN, "[SUCCESS]: Fitxer acceptat.");
         } else {
-            printF("Fitxer no acceptat: ");
-            printF(filename);
-            printF("\nWorker media només accepta tipus de fitxer: .wav, .jpg, .png\n");
+            printColor(RED, "[ERROR]: Fitxer no acceptat.");
+            printColor(YELLOW, "Worker media només accepta tipus de fitxer: .wav, .jpg, .png");
             continue;
         }
 
@@ -100,12 +134,16 @@ int main(int argc, char *argv[]) {
         snprintf(response, FRAME_SIZE, "Processed: %.244s", buffer);
 
         send_frame(gothamSocket, response, strlen(response));
-        printF("Resposta enviada a Gotham: ");
-        printF(response);
-        printF("\n");
+        printColor(GREEN, "[SUCCESS]: Resposta enviada a Gotham:");
+        printColor(MAGENTA, response);
     }
 
+    printColor(YELLOW, "[INFO]: Desconnectant de Gotham...");
     close(gothamSocket);
+    printColor(GREEN, "[SUCCESS]: Desconnectat correctament de Gotham.");
+
+    // Alliberem memòria
     alliberarMemoria(harleyConfig);
+    printColor(GREEN, "[SUCCESS]: Memòria alliberada correctament.");
     return 0;
 }
