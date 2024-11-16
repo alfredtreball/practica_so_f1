@@ -51,6 +51,46 @@ int buscarWorker(const char *type, WorkerManager *manager, char *ip, int *port);
 int logoutWorkerBySocket(int socket_fd, WorkerManager *manager);
 void alliberarMemoria(GothamConfig *gothamConfig);
 
+
+void mostrarCaratula() {
+    printF(GREEN BOLD);
+    printF("###############################################\n");
+    printF("#                                             #\n");
+    printF("#       BENVINGUT AL SERVIDOR GOTHAM          #\n");
+    printF("#                                             #\n");
+    printF("#      Gestió de connexions amb Harley,       #\n");
+    printF("#        Enigma i Fleck Workers              #\n");
+    printF("#                                             #\n");
+    printF("###############################################\n\n");
+    printF(RESET);
+}
+
+// Funció per registrar els logs al terminal
+void logInfo(const char *msg) {
+    printF(CYAN "[INFO]: " RESET);
+    printF(msg);
+    printF("\n");
+}
+
+void logWarning(const char *msg) {
+    printF(YELLOW "[WARNING]: " RESET);
+    printF(msg);
+    printF("\n");
+}
+
+void logError(const char *msg) {
+    printF(RED "[ERROR]: " RESET);
+    printF(msg);
+    printF("\n");
+}
+
+void logSuccess(const char *msg) {
+    printF(GREEN "[SUCCESS]: " RESET);
+    printF(msg);
+    printF("\n");
+}
+
+
 WorkerManager *createWorkerManager() {
     WorkerManager *manager = malloc(sizeof(WorkerManager)); // Reserva memòria per al WorkerManager.
     if (!manager) {
@@ -199,10 +239,14 @@ void *esperarConexiones(void *arg) { //Utilitzem select() per gestionar tres soc
 * @Retorn: ----
 ************************************************/
 void processCommandInGotham(const char *command, int client_fd, WorkerManager *manager) {
-    // Feu una còpia de la comanda perquè strtok la modificarà
+    // Crear una còpia de la comanda en memòria dinàmica perquè strtok la modificarà
     char *commandCopy = strdup(command);
     if (!commandCopy) {
-        perror("Error duplicant la comanda");
+        char *error_msg = strdup("\033[31m[ERROR]: Error duplicant la comanda\033[0m\n"); // Vermell
+        if (error_msg) {
+            printF(error_msg);
+            free(error_msg);
+        }
         send_frame(client_fd, "ERROR COMMAND", 13);
         return;
     }
@@ -210,70 +254,163 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
     // Separar la comanda per camps utilitzant '|'
     char *token = strtok(commandCopy, "|"); // Primer camp (id)
     token = strtok(NULL, "|"); // Segon camp (comanda)
-    
+
     // Verificar que s'ha obtingut la comanda
     if (token == NULL) {
+        char *warning_msg = strdup("\033[33m[WARNING]: Comanda rebuda sense contingut vàlid\033[0m\n"); // Groc
+        if (warning_msg) {
+            printF(warning_msg);
+            free(warning_msg);
+        }
         free(commandCopy);
         send_frame(client_fd, "ERROR COMMAND", 13);
         return;
     }
 
     if (strcasecmp(token, "CONNECT") == 0) {
+        char *connect_msg = strdup("\033[32m[SUCCESS]: Client connectat correctament\033[0m\n"); // Verd
+        if (connect_msg) {
+            printF(connect_msg);
+            free(connect_msg);
+        }
         send_frame(client_fd, "ACK", 3); // Confirma la connexió
     } else if (strncasecmp(token, "DISTORT", 7) == 0) {
-        char fileName[100];
-        int factor;
+        char *fileName = malloc(100);
+        if (!fileName) {
+            char *error_msg = strdup("\033[31m[ERROR]: Error assignant memòria per al fitxer DISTORT\033[0m\n");
+            if (error_msg) {
+                printF(error_msg);
+                free(error_msg);
+            }
+            free(commandCopy);
+            send_frame(client_fd, "ERROR DISTORT MEMORY", 20);
+            return;
+        }
+        int factor = 0;
 
         // Parsejar manualment la comanda per obtenir els paràmetres
         char *rest = strtok(NULL, "|"); // Obtenim el paràmetre de fitxer
         if (rest) {
-            strncpy(fileName, rest, sizeof(fileName));
+            strncpy(fileName, rest, 100);
             rest = strtok(NULL, "|"); // Obtenim el factor
             if (rest) {
                 factor = atoi(rest);
             } else {
-                send_frame(client_fd, "ERROR DISTORT PARAMS", 20);
+                char *error_params_msg = strdup("\033[31m[ERROR]: Paràmetres de DISTORT incorrectes\033[0m\n"); // Vermell
+                if (error_params_msg) {
+                    printF(error_params_msg);
+                    free(error_params_msg);
+                }
+                free(fileName);
                 free(commandCopy);
+                send_frame(client_fd, "ERROR DISTORT PARAMS", 20);
                 return;
             }
         }
 
-        char ip[16];
-        int port;
+        char *ip = malloc(16);
+        int port = 0;
+        if (!ip) {
+            char *error_msg = strdup("\033[31m[ERROR]: Error assignant memòria per a l'IP del worker\033[0m\n");
+            if (error_msg) {
+                printF(error_msg);
+                free(error_msg);
+            }
+            free(fileName);
+            free(commandCopy);
+            send_frame(client_fd, "ERROR DISTORT MEMORY", 20);
+            return;
+        }
+
         pthread_mutex_lock(&manager->mutex); // Bloqueja l'accés al WorkerManager
         int result = buscarWorker("MEDIA", manager, ip, &port);
         pthread_mutex_unlock(&manager->mutex);
 
         if (result == 0) {
-            char response[256];
-            snprintf(response, sizeof(response), "DISTORT_OK %s:%d Factor:%d", ip, port, factor);
-            send_frame(client_fd, response, strlen(response));
+            char *success_distort_msg = malloc(256);
+            if (success_distort_msg) {
+                snprintf(success_distort_msg, 256, "\033[36m[INFO]: DISTORT redirigit al worker amb IP %s i port %d\033[0m\n", ip, port); // Blau clar
+                printF(success_distort_msg);
+                free(success_distort_msg);
+            }
+
+            char *response = malloc(256);
+            if (response) {
+                snprintf(response, 256, "DISTORT_OK %s:%d Factor:%d", ip, port, factor);
+                send_frame(client_fd, response, strlen(response));
+                free(response);
+            }
         } else {
+            char *warning_no_worker_msg = strdup("\033[33m[WARNING]: Cap worker disponible per DISTORT\033[0m\n"); // Groc
+            if (warning_no_worker_msg) {
+                printF(warning_no_worker_msg);
+                free(warning_no_worker_msg);
+            }
             send_frame(client_fd, "DISTORT_KO", 10);
         }
+        free(ip);
+        free(fileName);
     } else if (strcasecmp(token, "CHECK STATUS") == 0) {
+        char *success_status_msg = strdup("\033[32m[SUCCESS]: Sol·licitud de CHECK STATUS processada\033[0m\n"); // Verd
+        if (success_status_msg) {
+            printF(success_status_msg);
+            free(success_status_msg);
+        }
         send_frame(client_fd, "STATUS OK ACK", 13);
     } else if (strcasecmp(token, "CLEAR ALL") == 0) {
+        char *info_clear_all_msg = strdup("\033[35m[INFO]: Sol·licitud de CLEAR ALL rebuda i processada\033[0m\n"); // Magenta
+        if (info_clear_all_msg) {
+            printF(info_clear_all_msg);
+            free(info_clear_all_msg);
+        }
         send_frame(client_fd, "ACK CLEAR ALL", 13);
     } else if (strcasecmp(token, "LOGOUT") == 0) {
+        char *warning_logout_msg = strdup("\033[33m[WARNING]: Client sol·licitant LOGOUT\033[0m\n"); // Groc
+        if (warning_logout_msg) {
+            printF(warning_logout_msg);
+            free(warning_logout_msg);
+        }
         send_frame(client_fd, "ACK LOGOUT", 10);
+
         pthread_mutex_lock(&manager->mutex);
         int result = logoutWorkerBySocket(client_fd, manager);
         pthread_mutex_unlock(&manager->mutex);
 
         if (result == 0) {
+            char *success_logout_msg = strdup("\033[32m[SUCCESS]: Worker eliminat del registre\033[0m\n"); // Verd
+            if (success_logout_msg) {
+                printF(success_logout_msg);
+                free(success_logout_msg);
+            }
             send_frame(client_fd, "ACK LOGOUT", 10);
         } else {
+            char *error_logout_msg = strdup("\033[31m[ERROR]: Error eliminant el worker del registre\033[0m\n"); // Vermell
+            if (error_logout_msg) {
+                printF(error_logout_msg);
+                free(error_logout_msg);
+            }
             send_frame(client_fd, "ERROR LOGOUT", 12);
         }
+
         close(client_fd); // Tanca el socket del client
-        printf("Fleck desconnectat: socket_fd=%d\n", client_fd);
+        char *info_disconnect_msg = malloc(128);
+        if (info_disconnect_msg) {
+            snprintf(info_disconnect_msg, 128, "\033[36m[INFO]: Connexió del client desconnectada: socket_fd=%d\033[0m\n", client_fd); // Blau clar
+            printF(info_disconnect_msg);
+            free(info_disconnect_msg);
+        }
     } else {
+        char *error_unknown_command_msg = strdup("\033[31m[ERROR]: Comanda desconeguda rebuda\033[0m\n"); // Vermell
+        if (error_unknown_command_msg) {
+            printF(error_unknown_command_msg);
+            free(error_unknown_command_msg);
+        }
         send_frame(client_fd, "ERROR COMMAND", 13);
     }
 
     free(commandCopy); // Alliberar la memòria de la còpia
 }
+
 
 /***********************************************
 * @Finalitat: Registra un nou worker a Gotham.
@@ -385,20 +522,39 @@ void alliberarMemoria(GothamConfig *gothamConfig) {
 ************************************************/
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        printf("Ús: ./gotham <fitxer de configuració>\n");
+        printF(RED "Ús: ./gotham <fitxer de configuració>\n" RESET);
         return 1;
     }
 
+    mostrarCaratula();
+
+    // Carrega la configuració
     GothamConfig *config = malloc(sizeof(GothamConfig));
     if (!config) {
-        printf("Error assignant memòria.\n");
+        logError("Error assignant memòria per a la configuració.");
         return 1;
     }
 
     readConfigFileGeneric(argv[1], config, CONFIG_GOTHAM);
+    logInfo("Configuració carregada correctament.");
 
+    // Inicia els sockets
     int server_fd_fleck = startServer(config->ipFleck, config->portFleck);
+    if (server_fd_fleck < 0) {
+        logError("No s'ha pogut iniciar el servidor de Fleck.");
+        free(config);
+        return 1;
+    }
+    logSuccess("Servidor Fleck en funcionament.");
+
     int server_fd_enigma = startServer(config->ipHarEni, config->portHarEni);
+    if (server_fd_enigma < 0) {
+        logError("No s'ha pogut iniciar el servidor de Enigma/Harley.");
+        close(server_fd_fleck);
+        free(config);
+        return 1;
+    }
+    logSuccess("Servidor Enigma/Harley en funcionament.");
 
     int server_fds[3] = {server_fd_fleck, server_fd_enigma, -1};
     pthread_t thread;
@@ -407,6 +563,8 @@ int main(int argc, char *argv[]) {
 
     close(server_fd_fleck);
     close(server_fd_enigma);
-    alliberarMemoria(config);
+    free(config);
+
+    logInfo("Servidor Gotham tancat correctament.");
     return 0;
 }
