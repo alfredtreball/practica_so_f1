@@ -20,7 +20,7 @@
 #include <sys/socket.h> // Funcions per a sockets
 #include <netinet/in.h> // Estructura sockaddr_in
 #include <pthread.h>    // Per treballar amb fils
-
+#include <ctype.h>
 #include "FileReader/FileReader.h"
 #include "StringUtils/StringUtils.h"
 #include "DataConversion/DataConversion.h"
@@ -41,16 +41,6 @@ typedef struct {
     int capacity;               // Capacitat actual de la llista
     pthread_mutex_t mutex;      // Mutex per sincronitzar l'accés als workers
 } WorkerManager;
-
-// Declaració de funcions
-void *gestionarConexion(void *arg);
-void *esperarConexiones(void *arg);
-void processCommandInGotham(const char *command, int client_fd, WorkerManager *manager);
-void registrarWorker(const char *payload, WorkerManager *manager, int client_fd);
-int buscarWorker(const char *type, WorkerManager *manager, char *ip, int *port);
-int logoutWorkerBySocket(int socket_fd, WorkerManager *manager);
-void alliberarMemoria(GothamConfig *gothamConfig);
-
 
 void mostrarCaratula() {
     printF(GREEN BOLD);
@@ -89,6 +79,68 @@ void logSuccess(const char *msg) {
     printF(msg);
     printF("\n");
 }
+// Declaració de funcions
+void *gestionarConexion(void *arg);
+void *esperarConexiones(void *arg);
+void processCommandInGotham(const char *command, int client_fd, WorkerManager *manager);
+void registrarWorker(const char *payload, WorkerManager *manager, int client_fd);
+int buscarWorker(const char *type, WorkerManager *manager, char *ip, int *port);
+int logoutWorkerBySocket(int socket_fd, WorkerManager *manager);
+void alliberarMemoria(GothamConfig *gothamConfig);
+
+void processRegisterWorker(const char *payload, WorkerManager *manager, int client_fd) {
+    char type[10] = {0}, ip[16] = {0};
+    int port = 0;
+
+    // Divideix el payload en parts utilitzant '&'
+    char *payloadCopy = strdup(payload);
+    if (!payloadCopy) {
+        logError("Error duplicant el payload.");
+        send_frame(client_fd, "CON_KO", strlen("CON_KO"));
+        return;
+    }
+
+    char *token = strtok(payloadCopy, "&");
+    if (token) strncpy(type, token, sizeof(type) - 1);
+
+    token = strtok(NULL, "&");
+    if (token) strncpy(ip, token, sizeof(ip) - 1);
+
+    token = strtok(NULL, "&");
+    if (token) port = atoi(token); // Convertim el port
+
+    free(payloadCopy);
+
+    pthread_mutex_lock(&manager->mutex);
+
+    // Comprova si cal ampliar la capacitat
+    if (manager->workerCount == manager->capacity) {
+        manager->capacity *= 2;
+        WorkerInfo *newWorkers = realloc(manager->workers, manager->capacity * sizeof(WorkerInfo));
+        if (!newWorkers) {
+            logError("Error ampliant la capacitat dels workers.");
+            pthread_mutex_unlock(&manager->mutex);
+            send_frame(client_fd, "CON_KO", strlen("CON_KO"));
+            return;
+        }
+        manager->workers = newWorkers;
+    }
+
+    // Afegim el nou worker a la llista
+    WorkerInfo *worker = &manager->workers[manager->workerCount++];
+    strncpy(worker->type, type, sizeof(worker->type));
+    strncpy(worker->ip, ip, sizeof(worker->ip));
+    worker->port = port;
+
+    pthread_mutex_unlock(&manager->mutex);
+
+    // Responem al client i tanquem la connexió
+    send_frame(client_fd, "CON_OK", strlen("CON_OK"));
+    logSuccess("Worker registrat correctament a Gotham.");
+    close(client_fd);
+}
+
+
 
 
 WorkerManager *createWorkerManager() {
@@ -239,177 +291,191 @@ void *esperarConexiones(void *arg) { //Utilitzem select() per gestionar tres soc
 * @Retorn: ----
 ************************************************/
 void processCommandInGotham(const char *command, int client_fd, WorkerManager *manager) {
-    // Crear una còpia de la comanda en memòria dinàmica perquè strtok la modificarà
-    char *commandCopy = strdup(command);
+
+     // Depuración del comando recibido
+    printF("\033[34m[DEBUG]: Comando completo recibido: ");
+    printF(command);
+    printF("\033[0m\n");
+
+    // Limpiar prefijo numérico (si existe)
+    const char *cleanCommand = command;
+    if (isdigit(command[0])) {
+        cleanCommand = strchr(command, '|'); // Buscar el separador '|'
+        if (cleanCommand) {
+            cleanCommand++; // Saltar el '|'
+        } else {
+            cleanCommand = command; // Si no hay '|', usar el comando completo
+        }
+    }
+
+    // Depuración del comando limpio
+    printF("\033[34m[DEBUG]: Comando limpio: ");
+    printF(cleanCommand);
+    printF("\033[0m\n");
+    // Crear una còpia de la comanda perquè strtok modificarà la cadena
+    char *commandCopy = strdup(cleanCommand);
     if (!commandCopy) {
         char *error_msg = strdup("\033[31m[ERROR]: Error duplicant la comanda\033[0m\n"); // Vermell
         if (error_msg) {
             printF(error_msg);
             free(error_msg);
         }
-        send_frame(client_fd, "ERROR COMMAND", 13);
+        send_frame(client_fd, "ERROR COMMAND", strlen("ERROR COMMAND"));
         return;
     }
 
-    // Separar la comanda per camps utilitzant '|'
-    char *token = strtok(commandCopy, "|"); // Primer camp (id)
-    token = strtok(NULL, "|"); // Segon camp (comanda)
-
-    // Verificar que s'ha obtingut la comanda
-    if (token == NULL) {
+    // Separar la comanda en camps utilitzant '&'
+    char *token = strtok(commandCopy, "&");
+    if (!token) {
         char *warning_msg = strdup("\033[33m[WARNING]: Comanda rebuda sense contingut vàlid\033[0m\n"); // Groc
         if (warning_msg) {
             printF(warning_msg);
             free(warning_msg);
         }
         free(commandCopy);
-        send_frame(client_fd, "ERROR COMMAND", 13);
+        send_frame(client_fd, "ERROR COMMAND", strlen("ERROR COMMAND"));
         return;
     }
 
-    if (strcasecmp(token, "CONNECT") == 0) {
-        char *connect_msg = strdup("\033[32m[SUCCESS]: Client connectat correctament\033[0m\n"); // Verd
+    printF("\033[34m[DEBUG]: Token inicial: ");
+    printF(token);
+    printF("\033[0m\n");
+
+    // Analitzar i identificar el tipus de comanda
+    if (strcasecmp(token, "REGISTER WORKER") == 0) {
+        // Processar el registre del worker
+        char *workerType = strtok(NULL, "&");
+        char *workerIP = strtok(NULL, "&");
+        char *workerPortStr = strtok(NULL, "&");
+
+        if (!workerType || !workerIP || !workerPortStr) {
+            logError("Dades incompletes per registrar el worker.");
+            send_frame(client_fd, "CON_KO", strlen("CON_KO"));
+            free(commandCopy);
+            return;
+        }
+
+        int workerPort = atoi(workerPortStr);
+
+        // Afegir el worker a la llista
+        pthread_mutex_lock(&manager->mutex);
+        if (manager->workerCount == manager->capacity) {
+            manager->capacity *= 2;
+            WorkerInfo *newWorkers = realloc(manager->workers, manager->capacity * sizeof(WorkerInfo));
+            if (!newWorkers) {
+                logError("Error ampliant la capacitat de la llista de workers.");
+                pthread_mutex_unlock(&manager->mutex);
+                send_frame(client_fd, "CON_KO", strlen("CON_KO"));
+                free(commandCopy);
+                return;
+            }
+            manager->workers = newWorkers;
+        }
+
+        WorkerInfo *worker = &manager->workers[manager->workerCount++];
+        strncpy(worker->type, workerType, sizeof(worker->type) - 1);
+        strncpy(worker->ip, workerIP, sizeof(worker->ip) - 1);
+        worker->port = workerPort;
+        worker->socket_fd = client_fd;
+        pthread_mutex_unlock(&manager->mutex);
+
+        logSuccess("Worker registrat correctament.");
+        send_frame(client_fd, "CON_OK", strlen("CON_OK"));
+    } else if (strcasecmp(token, "CONNECT") == 0) {
+        send_frame(client_fd, "ACK", strlen("ACK"));
+        char *connect_msg = strdup("\033[32m[SUCCESS]: Client connectat correctament.\033[0m\n");
         if (connect_msg) {
             printF(connect_msg);
             free(connect_msg);
         }
-        send_frame(client_fd, "ACK", 3); // Confirma la connexió
-    } else if (strncasecmp(token, "DISTORT", 7) == 0) {
-        char *fileName = malloc(100);
-        if (!fileName) {
-            char *error_msg = strdup("\033[31m[ERROR]: Error assignant memòria per al fitxer DISTORT\033[0m\n");
+    } else if (strcasecmp(token, "DISTORT") == 0) {
+        // Comanda DISTORT
+        char *fileName = strtok(NULL, "&");
+        char *factorStr = strtok(NULL, "&");
+
+        if (!fileName || !factorStr) {
+            char *error_msg = strdup("\033[31m[ERROR]: Falten camps per DISTORT.\033[0m\n");
             if (error_msg) {
                 printF(error_msg);
                 free(error_msg);
             }
+            send_frame(client_fd, "DISTORT_KO", strlen("DISTORT_KO"));
             free(commandCopy);
-            send_frame(client_fd, "ERROR DISTORT MEMORY", 20);
-            return;
-        }
-        int factor = 0;
-
-        // Parsejar manualment la comanda per obtenir els paràmetres
-        char *rest = strtok(NULL, "|"); // Obtenim el paràmetre de fitxer
-        if (rest) {
-            strncpy(fileName, rest, 100);
-            rest = strtok(NULL, "|"); // Obtenim el factor
-            if (rest) {
-                factor = atoi(rest);
-            } else {
-                char *error_params_msg = strdup("\033[31m[ERROR]: Paràmetres de DISTORT incorrectes\033[0m\n"); // Vermell
-                if (error_params_msg) {
-                    printF(error_params_msg);
-                    free(error_params_msg);
-                }
-                free(fileName);
-                free(commandCopy);
-                send_frame(client_fd, "ERROR DISTORT PARAMS", 20);
-                return;
-            }
-        }
-
-        char *ip = malloc(16);
-        int port = 0;
-        if (!ip) {
-            char *error_msg = strdup("\033[31m[ERROR]: Error assignant memòria per a l'IP del worker\033[0m\n");
-            if (error_msg) {
-                printF(error_msg);
-                free(error_msg);
-            }
-            free(fileName);
-            free(commandCopy);
-            send_frame(client_fd, "ERROR DISTORT MEMORY", 20);
             return;
         }
 
-        pthread_mutex_lock(&manager->mutex); // Bloqueja l'accés al WorkerManager
-        int result = buscarWorker("MEDIA", manager, ip, &port);
+        int factor = atoi(factorStr);
+
+        char workerIP[16] = {0};
+        int workerPort = 0;
+
+        pthread_mutex_lock(&manager->mutex);
+        int result = buscarWorker("MEDIA", manager, workerIP, &workerPort);
         pthread_mutex_unlock(&manager->mutex);
 
         if (result == 0) {
-            char *success_distort_msg = malloc(256);
-            if (success_distort_msg) {
-                snprintf(success_distort_msg, 256, "\033[36m[INFO]: DISTORT redirigit al worker amb IP %s i port %d\033[0m\n", ip, port); // Blau clar
-                printF(success_distort_msg);
-                free(success_distort_msg);
-            }
-
-            char *response = malloc(256);
-            if (response) {
-                snprintf(response, 256, "DISTORT_OK %s:%d Factor:%d", ip, port, factor);
-                send_frame(client_fd, response, strlen(response));
-                free(response);
+            char response[FRAME_SIZE];
+            snprintf(response, FRAME_SIZE, "DISTORT_OK&%s&%d&%d", workerIP, workerPort, factor);
+            send_frame(client_fd, response, strlen(response));
+            char *distort_msg = strdup("\033[36m[INFO]: DISTORT redirigit correctament.\033[0m\n");
+            if (distort_msg) {
+                printF(distort_msg);
+                free(distort_msg);
             }
         } else {
-            char *warning_no_worker_msg = strdup("\033[33m[WARNING]: Cap worker disponible per DISTORT\033[0m\n"); // Groc
-            if (warning_no_worker_msg) {
-                printF(warning_no_worker_msg);
-                free(warning_no_worker_msg);
+            send_frame(client_fd, "DISTORT_KO", strlen("DISTORT_KO"));
+            char *warning_msg = strdup("\033[33m[WARNING]: No hi ha workers disponibles per DISTORT.\033[0m\n");
+            if (warning_msg) {
+                printF(warning_msg);
+                free(warning_msg);
             }
-            send_frame(client_fd, "DISTORT_KO", 10);
         }
-        free(ip);
-        free(fileName);
     } else if (strcasecmp(token, "CHECK STATUS") == 0) {
-        char *success_status_msg = strdup("\033[32m[SUCCESS]: Sol·licitud de CHECK STATUS processada\033[0m\n"); // Verd
-        if (success_status_msg) {
-            printF(success_status_msg);
-            free(success_status_msg);
+        send_frame(client_fd, "STATUS OK ACK", strlen("STATUS OK ACK"));
+        char *status_msg = strdup("\033[32m[SUCCESS]: Sol·licitud de CHECK STATUS processada.\033[0m\n");
+        if (status_msg) {
+            printF(status_msg);
+            free(status_msg);
         }
-        send_frame(client_fd, "STATUS OK ACK", 13);
     } else if (strcasecmp(token, "CLEAR ALL") == 0) {
-        char *info_clear_all_msg = strdup("\033[35m[INFO]: Sol·licitud de CLEAR ALL rebuda i processada\033[0m\n"); // Magenta
-        if (info_clear_all_msg) {
-            printF(info_clear_all_msg);
-            free(info_clear_all_msg);
+        send_frame(client_fd, "ACK CLEAR ALL", strlen("ACK CLEAR ALL"));
+        char *clear_msg = strdup("\033[35m[INFO]: Sol·licitud de CLEAR ALL rebuda i processada.\033[0m\n");
+        if (clear_msg) {
+            printF(clear_msg);
+            free(clear_msg);
         }
-        send_frame(client_fd, "ACK CLEAR ALL", 13);
     } else if (strcasecmp(token, "LOGOUT") == 0) {
-        char *warning_logout_msg = strdup("\033[33m[WARNING]: Client sol·licitant LOGOUT\033[0m\n"); // Groc
-        if (warning_logout_msg) {
-            printF(warning_logout_msg);
-            free(warning_logout_msg);
-        }
-        send_frame(client_fd, "ACK LOGOUT", 10);
-
         pthread_mutex_lock(&manager->mutex);
         int result = logoutWorkerBySocket(client_fd, manager);
         pthread_mutex_unlock(&manager->mutex);
 
         if (result == 0) {
-            char *success_logout_msg = strdup("\033[32m[SUCCESS]: Worker eliminat del registre\033[0m\n"); // Verd
-            if (success_logout_msg) {
-                printF(success_logout_msg);
-                free(success_logout_msg);
+            send_frame(client_fd, "ACK LOGOUT", strlen("ACK LOGOUT"));
+            char *logout_msg = strdup("\033[32m[SUCCESS]: Worker eliminat del registre.\033[0m\n");
+            if (logout_msg) {
+                printF(logout_msg);
+                free(logout_msg);
             }
-            send_frame(client_fd, "ACK LOGOUT", 10);
         } else {
-            char *error_logout_msg = strdup("\033[31m[ERROR]: Error eliminant el worker del registre\033[0m\n"); // Vermell
-            if (error_logout_msg) {
-                printF(error_logout_msg);
-                free(error_logout_msg);
+            send_frame(client_fd, "ERROR LOGOUT", strlen("ERROR LOGOUT"));
+            char *error_msg = strdup("\033[31m[ERROR]: Error eliminant el worker del registre.\033[0m\n");
+            if (error_msg) {
+                printF(error_msg);
+                free(error_msg);
             }
-            send_frame(client_fd, "ERROR LOGOUT", 12);
-        }
-
-        close(client_fd); // Tanca el socket del client
-        char *info_disconnect_msg = malloc(128);
-        if (info_disconnect_msg) {
-            snprintf(info_disconnect_msg, 128, "\033[36m[INFO]: Connexió del client desconnectada: socket_fd=%d\033[0m\n", client_fd); // Blau clar
-            printF(info_disconnect_msg);
-            free(info_disconnect_msg);
         }
     } else {
-        char *error_unknown_command_msg = strdup("\033[31m[ERROR]: Comanda desconeguda rebuda\033[0m\n"); // Vermell
-        if (error_unknown_command_msg) {
-            printF(error_unknown_command_msg);
-            free(error_unknown_command_msg);
+        send_frame(client_fd, "ERROR COMMAND", strlen("ERROR COMMAND"));
+        char *unknown_msg = strdup("\033[31m[ERROR]: Comanda desconeguda rebuda.\033[0m\n");
+        if (unknown_msg) {
+            printF(unknown_msg);
+            free(unknown_msg);
         }
-        send_frame(client_fd, "ERROR COMMAND", 13);
     }
 
     free(commandCopy); // Alliberar la memòria de la còpia
 }
+
 
 
 /***********************************************
