@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <arpa/inet.h>  // Per a la comunicació de xarxa
@@ -198,7 +199,7 @@ void *esperarConexiones(void *arg) { //Utilitzem select() per gestionar tres soc
 * @Retorn: ----
 ************************************************/
 void processCommandInGotham(const char *command, int client_fd, WorkerManager *manager) {
-     // Feu una còpia de la comanda perquè strtok la modificarà
+    // Feu una còpia de la comanda perquè strtok la modificarà
     char *commandCopy = strdup(command);
     if (!commandCopy) {
         perror("Error duplicant la comanda");
@@ -216,19 +217,25 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
         send_frame(client_fd, "ERROR COMMAND", 13);
         return;
     }
-    
-    printf("Comanda rebuda: '%s'\n", command);
-    trimCommand((char *)command); // Elimina espais i salts de línia
-    if (strcasecmp(command, "CONNECT") == 0) {
+
+    if (strcasecmp(token, "CONNECT") == 0) {
         send_frame(client_fd, "ACK", 3); // Confirma la connexió
-    } else if (strncasecmp(command, "DISTORT", 7) == 0) {
+    } else if (strncasecmp(token, "DISTORT", 7) == 0) {
         char fileName[100];
+        int factor;
 
         // Parsejar manualment la comanda per obtenir els paràmetres
-        char *rest = (char *)command + 8; // Saltar "DISTORT "
-        char *token = strtok(rest, " ");
-        if (token) {
-            strncpy(fileName, token, sizeof(fileName));
+        char *rest = strtok(NULL, "|"); // Obtenim el paràmetre de fitxer
+        if (rest) {
+            strncpy(fileName, rest, sizeof(fileName));
+            rest = strtok(NULL, "|"); // Obtenim el factor
+            if (rest) {
+                factor = atoi(rest);
+            } else {
+                send_frame(client_fd, "ERROR DISTORT PARAMS", 20);
+                free(commandCopy);
+                return;
+            }
         }
 
         char ip[16];
@@ -239,23 +246,33 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
 
         if (result == 0) {
             char response[256];
-            snprintf(response, sizeof(response), "DISTORT_OK %s:%d", ip, port);
+            snprintf(response, sizeof(response), "DISTORT_OK %s:%d Factor:%d", ip, port, factor);
             send_frame(client_fd, response, strlen(response));
         } else {
             send_frame(client_fd, "DISTORT_KO", 10);
         }
-    } else if (strcasecmp(command, "CHECK STATUS") == 0) {
+    } else if (strcasecmp(token, "CHECK STATUS") == 0) {
         send_frame(client_fd, "STATUS OK ACK", 13);
-    } else if (strcasecmp(command, "CLEAR ALL") == 0) {
+    } else if (strcasecmp(token, "CLEAR ALL") == 0) {
         send_frame(client_fd, "ACK CLEAR ALL", 13);
-    } else if (strncasecmp(command, "LOGOUT", 6) == 0) { // Canviat a `strncmp`
-        // Gestionar el LOGOUT del Fleck
-        send_frame(client_fd, "ACK LOGOUT", 10); // Confirmar el LOGOUT
-        close(client_fd); // Tanquem el socket del Fleck
+    } else if (strcasecmp(token, "LOGOUT") == 0) {
+        send_frame(client_fd, "ACK LOGOUT", 10);
+        pthread_mutex_lock(&manager->mutex);
+        int result = logoutWorkerBySocket(client_fd, manager);
+        pthread_mutex_unlock(&manager->mutex);
+
+        if (result == 0) {
+            send_frame(client_fd, "ACK LOGOUT", 10);
+        } else {
+            send_frame(client_fd, "ERROR LOGOUT", 12);
+        }
+        close(client_fd); // Tanca el socket del client
         printf("Fleck desconnectat: socket_fd=%d\n", client_fd);
     } else {
         send_frame(client_fd, "ERROR COMMAND", 13);
     }
+
+    free(commandCopy); // Alliberar la memòria de la còpia
 }
 
 /***********************************************
