@@ -35,8 +35,9 @@ void printColor(const char *color, const char *message) {
 // Serialización y deserialización consistentes
 void serialize_frame(const Frame *frame, char *buffer) {
     memset(buffer, 0, FRAME_SIZE);
-    snprintf(buffer, FRAME_SIZE, "%c|%04hu|%u|%04hx|%s",
-             frame->type, frame->data_length, frame->timestamp, frame->checksum, frame->data);
+    snprintf(buffer, FRAME_SIZE, "%02x|%04x|%u|%04x|%s",
+         frame->type, frame->data_length, frame->timestamp,
+         frame->checksum, frame->data);
 }
 
 int deserialize_frame(const char *buffer, Frame *frame) {
@@ -182,19 +183,30 @@ int main(int argc, char *argv[]) {
     printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Connectat correctament a Gotham!");
 
     // Enviar frame de registro
-    Frame frame = {0};
-    frame.type = 0x02;
-    printf("[DEBUG]: frame.type abans de serialitzar: %02x\n", frame.type);
-    snprintf(frame.data, sizeof(frame.data), "%s&%s&%d",
-         harleyConfig->workerType, harleyConfig->ipFleck, harleyConfig->portFleck);
+    // Crear el frame de registre
+    Frame frame;
+    memset(&frame, 0, sizeof(Frame));
+    frame.type = 0x02; // Tipus REGISTER
+
+    // Serialitzar les dades (WorkerType, IP i Port)
+    snprintf(frame.data, sizeof(frame.data), "%s&%s&%d", harleyConfig->workerType, harleyConfig->ipFleck, harleyConfig->portFleck);
+
+    // Calcular longitud de les dades
     frame.data_length = strlen(frame.data);
-    frame.timestamp = (uint32_t)time(NULL);
+    // Calcular el checksum
     frame.checksum = calculate_checksum(frame.data, frame.data_length);
 
+    // Serialitzar el frame complet
     char buffer[FRAME_SIZE];
-    printf("[DEBUG]: Frame abans de serialitzar: %s&%s&%d\n", harleyConfig->workerType, harleyConfig->ipFleck, harleyConfig->portFleck);
     serialize_frame(&frame, buffer);
-    printf("[DEBUG]: Frame serialitzat: %s\n", buffer);
+
+    // Enviar el frame serialitzat a Gotham
+    if (write(gothamSocket, buffer, FRAME_SIZE) < 0) {
+        printColor(ANSI_COLOR_RED, "[ERROR]: Error enviant el registre a Gotham.");
+        close(gothamSocket);
+        free(harleyConfig);
+        return 1;
+    }
 
     if (write(gothamSocket, buffer, FRAME_SIZE) < 0) {
         printColor(ANSI_COLOR_RED, "[ERROR]: Error enviant el registre a Gotham.");
@@ -228,6 +240,7 @@ int main(int argc, char *argv[]) {
         free(harleyConfig);
         return 1;
     }
+
 
     if (response.type == 0x02 && strcmp(response.data, "CON_OK") == 0) {
         printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Worker registrat correctament a Gotham.");

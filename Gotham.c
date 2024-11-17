@@ -192,7 +192,6 @@ void *gestionarConexion(void *arg) {
         processCommandInGotham(frame_buffer, client_fd, manager);
     }
 
-
     // Si el client es desconnecta o hi ha un error, elimina el worker.
     pthread_mutex_lock(&manager->mutex);
     logoutWorkerBySocket(client_fd, manager);
@@ -294,74 +293,38 @@ void serialize_frame(const Frame *frame, char *buffer) {
 }
 
 int deserialize_frame(const char *buffer, Frame *frame) {
-    if (buffer == NULL || frame == NULL) {
-        // Error: Parámetros de entrada inválidos
-        return -1;
-    }
+    if (!buffer || !frame) return -1;
 
-    memset(frame, 0, sizeof(Frame));
-
-    // Hacemos una copia del buffer para no modificar el original
     char localBuffer[FRAME_SIZE];
     strncpy(localBuffer, buffer, FRAME_SIZE - 1);
-    localBuffer[FRAME_SIZE - 1] = '\0'; // Aseguramos la terminación nula
+    localBuffer[FRAME_SIZE - 1] = '\0';
 
-    char *token = NULL;
+    char *token = strtok(localBuffer, "|");
+    if (token) frame->type = (uint8_t)strtoul(token, NULL, 16);
 
-    // Campo TYPE
-    token = strtok(localBuffer, "|");
-    if (token != NULL) {
-        frame->type = (uint8_t)strtoul(token, NULL, 16);
-    } else {
-        return -1;
-    }
-
-    // Campo DATA_LENGTH
     token = strtok(NULL, "|");
-    if (token != NULL) {
-        unsigned int data_length = atoi(token);
-        if (data_length > sizeof(frame->data)) {
-            // Error: DATA_LENGTH fuera de rango
-            return -1;
-        }
-        frame->data_length = (uint16_t)data_length;
-    } else {
-        // Error: Campo DATA_LENGTH faltante
-        return -1;
-    }
+    if (token) frame->data_length = (uint16_t)strtol(token, NULL, 10);
 
-    // Campo TIMESTAMP
     token = strtok(NULL, "|");
-    if (token != NULL) {
-        frame->timestamp = (uint32_t)strtoul(token, NULL, 10);
-    } else {
-        // Error: Campo TIMESTAMP faltante
-        return -1;
-    }
+    if (token) frame->timestamp = (uint32_t)strtoul(token, NULL, 10);
 
-    // Campo CHECKSUM
     token = strtok(NULL, "|");
-    if (token != NULL) {
-        frame->checksum = (uint16_t)strtoul(token, NULL, 16);
-    } else {
-        // Error: Campo CHECKSUM faltante
-        return -1;
-    }
+    if (token) frame->checksum = (uint16_t)strtol(token, NULL, 16);
 
-    // Campo DATA
     token = strtok(NULL, "|");
-    if (token != NULL) {
-        // Aseguramos que no copiamos más datos de los que podemos manejar
-        size_t dataToCopy = frame->data_length < sizeof(frame->data) - 1 ? frame->data_length : sizeof(frame->data) - 1;
-        strncpy(frame->data, token, dataToCopy);
-        frame->data[dataToCopy] = '\0'; // Aseguramos la terminación nula
-    } else {
-        // Error: Campo DATA faltante
+    if (token) {
+        strncpy(frame->data, token, frame->data_length);
+        frame->data[frame->data_length] = '\0'; // Assegura terminació nula
+    }
+
+    uint16_t calculated_checksum = calculate_checksum(frame->data, frame->data_length);
+    if (calculated_checksum != frame->checksum) {
         return -1;
     }
 
-    return 0; // Éxito
+    return 0;
 }
+
 
 /***********************************************
 * @Finalitat: Processa una comanda rebuda a Gotham.
@@ -375,7 +338,6 @@ int deserialize_frame(const char *buffer, Frame *frame) {
 void processCommandInGotham(const char *frame_buffer, int client_fd, WorkerManager *manager) {
     Frame frame;
     deserialize_frame(frame_buffer, &frame);
-    printf("[DEBUG]: Frame deserialitzat a Gotham - type: %02x, data: %s\n", frame.type, frame.data);
 
     // Validar checksum solo sobre los datos del frame
     uint16_t calculated_checksum = calculate_checksum(frame.data, frame.data_length);
@@ -389,7 +351,7 @@ void processCommandInGotham(const char *frame_buffer, int client_fd, WorkerManag
         write(client_fd, buffer, FRAME_SIZE);
         return;
     }
-    printf("[DEBUG]: Tipus de frame rebut: %02x\n", frame.type);
+
     switch (frame.type) {
         case 0x01: // CONNECT
             logSuccess("Client connectat correctament.");
@@ -406,13 +368,19 @@ void processCommandInGotham(const char *frame_buffer, int client_fd, WorkerManag
         case 0x02: // REGISTER
             logInfo("[DEBUG]: Processant registre de worker...");
             registrarWorker(frame.data, manager, client_fd);
+            // Construir el frame de resposta
             Frame response = {.type = 0x02, .data_length = 0, .timestamp = time(NULL)};
             strncpy(response.data, "CON_OK", sizeof(response.data) - 1);
             response.data_length = strlen(response.data);
+
+            // Calcular checksum
             response.checksum = calculate_checksum(response.data, response.data_length);
 
+            // Serialitzar el frame
             char buffer[FRAME_SIZE];
             serialize_frame(&response, buffer);
+
+            // Enviar la resposta a Harley
             write(client_fd, buffer, FRAME_SIZE);
             break;
 
@@ -437,9 +405,19 @@ void processCommandInGotham(const char *frame_buffer, int client_fd, WorkerManag
                         logInfo("[DEBUG]: Resposta del worker:");
                         logInfo(workerResponse);
 
-                        write(client_fd, workerResponse, FRAME_SIZE); // Envia la resposta a Fleck
+                        // Validar i reenviar la resposta al client
+                        Frame response;
+                        deserialize_frame(workerResponse, &response); // Deserialitzar resposta del worker
+
+                        // Recalcular el checksum abans de reenviar
+                        response.checksum = calculate_checksum(response.data, response.data_length);
+
+                        // Serialitzar la resposta per enviar-la a Fleck/Harley
+                        serialize_frame(&response, workerResponse);
+                        write(client_fd, workerResponse, FRAME_SIZE);
                         close(workerSocket);
-                    } else {
+                    }
+                    else {
                         logError("[ERROR]: Worker no ha respost.");
                         send_frame(client_fd, "DISTORT_KO", strlen("DISTORT_KO"));
                     }
@@ -471,10 +449,15 @@ void processCommandInGotham(const char *frame_buffer, int client_fd, WorkerManag
             Frame error_frame = {.type = 0xFF, .data_length = 0, .timestamp = time(NULL)};
             strncpy(error_frame.data, "CMD_KO", sizeof(error_frame.data) - 1);
             error_frame.data_length = strlen(error_frame.data);
+
+            // Calcular checksum
             error_frame.checksum = calculate_checksum(error_frame.data, error_frame.data_length);
 
+            // Serialitzar el frame
             char error_buffer[FRAME_SIZE];
             serialize_frame(&error_frame, error_buffer);
+
+            // Enviar la resposta d'error
             write(client_fd, error_buffer, FRAME_SIZE);
             break;
     }
