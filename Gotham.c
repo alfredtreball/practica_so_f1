@@ -89,10 +89,11 @@ int logoutWorkerBySocket(int socket_fd, WorkerManager *manager);
 void alliberarMemoria(GothamConfig *gothamConfig);
 
 void processRegisterWorker(const char *payload, WorkerManager *manager, int client_fd) {
-    char type[10] = {0}, ip[16] = {0};
-    int port = 0;
+    char type[10] = {0};  // Variable per emmagatzemar el tipus de worker (Media o Text)
+    char ip[16] = {0};    // Variable per emmagatzemar la IP del worker
+    int port = 0;         // Variable per emmagatzemar el port del worker
 
-    // Divideix el payload en parts utilitzant '&'
+    // Copiem el payload per processar-lo sense modificar l'original
     char *payloadCopy = strdup(payload);
     if (!payloadCopy) {
         logError("Error duplicant el payload.");
@@ -100,6 +101,7 @@ void processRegisterWorker(const char *payload, WorkerManager *manager, int clie
         return;
     }
 
+    // Dividim el payload en parts utilitzant '&'
     char *token = strtok(payloadCopy, "&");
     if (token) strncpy(type, token, sizeof(type) - 1);
 
@@ -107,13 +109,16 @@ void processRegisterWorker(const char *payload, WorkerManager *manager, int clie
     if (token) strncpy(ip, token, sizeof(ip) - 1);
 
     token = strtok(NULL, "&");
-    if (token) port = atoi(token); // Convertim el port
+    if (token) port = atoi(token); // Convertim el port a un número enter
 
     free(payloadCopy);
 
+    // Debug: Afegim logs per comprovar les variables
+    printf("[DEBUG]: Tipus de worker: %s, IP: %s, Port: %d\n", type, ip, port);
+
     pthread_mutex_lock(&manager->mutex);
 
-    // Comprova si cal ampliar la capacitat
+    // Ampliem la capacitat si cal
     if (manager->workerCount == manager->capacity) {
         manager->capacity *= 2;
         WorkerInfo *newWorkers = realloc(manager->workers, manager->capacity * sizeof(WorkerInfo));
@@ -128,19 +133,17 @@ void processRegisterWorker(const char *payload, WorkerManager *manager, int clie
 
     // Afegim el nou worker a la llista
     WorkerInfo *worker = &manager->workers[manager->workerCount++];
-    strncpy(worker->type, type, sizeof(worker->type));
-    strncpy(worker->ip, ip, sizeof(worker->ip));
+    strncpy(worker->type, type, sizeof(worker->type) - 1);
+    strncpy(worker->ip, ip, sizeof(worker->ip) - 1);
     worker->port = port;
 
     pthread_mutex_unlock(&manager->mutex);
 
-    // Responem al client i tanquem la connexió
+    // Responem al client amb èxit
     send_frame(client_fd, "CON_OK", strlen("CON_OK"));
     logSuccess("Worker registrat correctament a Gotham.");
     close(client_fd);
 }
-
-
 
 
 WorkerManager *createWorkerManager() {
@@ -184,10 +187,11 @@ void *gestionarConexion(void *arg) {
 
     free(arg); // Alliberem només l'espai assignat per `arg`, no `manager`.
 
-    char frame[FRAME_SIZE];
-    while (read(client_fd, frame, FRAME_SIZE) > 0) {
-        processCommandInGotham(frame, client_fd, manager); // Processa les comandes rebudes.
+    char frame_buffer[FRAME_SIZE];
+    while (read(client_fd, frame_buffer, FRAME_SIZE) > 0) {
+        processCommandInGotham(frame_buffer, client_fd, manager);
     }
+
 
     // Si el client es desconnecta o hi ha un error, elimina el worker.
     pthread_mutex_lock(&manager->mutex);
@@ -236,7 +240,7 @@ void *esperarConexiones(void *arg) { //Utilitzem select() per gestionar tres soc
        // Gestiona connexions de Fleck
         if (FD_ISSET(server_fd_fleck, &read_fds)) {
             int *client_fd = malloc(sizeof(int) + sizeof(WorkerManager *));
-            *client_fd = accept(server_fd_fleck, NULL, NULL);
+            *client_fd = accept_connection(server_fd_fleck);
             if (*client_fd >= 0) {
                 memcpy(client_fd + 1, &manager, sizeof(WorkerManager *));
                 pthread_t thread;
@@ -250,7 +254,7 @@ void *esperarConexiones(void *arg) { //Utilitzem select() per gestionar tres soc
         // Gestiona connexions de Enigma
         if (FD_ISSET(server_fd_enigma, &read_fds)) {
             int *client_fd = malloc(sizeof(int) + sizeof(WorkerManager *));
-            *client_fd = accept(server_fd_enigma, NULL, NULL);
+            *client_fd = accept_connection(server_fd_enigma);
             if (*client_fd >= 0) {
                 memcpy(client_fd + 1, &manager, sizeof(WorkerManager *));
                 pthread_t thread;
@@ -264,7 +268,7 @@ void *esperarConexiones(void *arg) { //Utilitzem select() per gestionar tres soc
         // Gestiona connexions de Harley
         if (FD_ISSET(server_fd_harley, &read_fds)) {
             int *client_fd = malloc(sizeof(int) + sizeof(WorkerManager *));
-            *client_fd = accept(server_fd_harley, NULL, NULL);
+            *client_fd = accept_connection(server_fd_harley);
             if (*client_fd >= 0) {
                 memcpy(client_fd + 1, &manager, sizeof(WorkerManager *));
                 pthread_t thread;
@@ -281,6 +285,84 @@ void *esperarConexiones(void *arg) { //Utilitzem select() per gestionar tres soc
     return NULL;
 }
 
+// Ajusta el uso de checksum en Gotham.c
+void serialize_frame(const Frame *frame, char *buffer) {
+    memset(buffer, 0, FRAME_SIZE);
+    snprintf(buffer, FRAME_SIZE, "%02x|%04x|%u|%04x|%s",
+             frame->type, frame->data_length, frame->timestamp,
+             frame->checksum, frame->data);
+}
+
+int deserialize_frame(const char *buffer, Frame *frame) {
+    if (buffer == NULL || frame == NULL) {
+        // Error: Parámetros de entrada inválidos
+        return -1;
+    }
+
+    memset(frame, 0, sizeof(Frame));
+
+    // Hacemos una copia del buffer para no modificar el original
+    char localBuffer[FRAME_SIZE];
+    strncpy(localBuffer, buffer, FRAME_SIZE - 1);
+    localBuffer[FRAME_SIZE - 1] = '\0'; // Aseguramos la terminación nula
+
+    char *token = NULL;
+
+    // Campo TYPE
+    token = strtok(localBuffer, "|");
+    if (token != NULL) {
+        frame->type = (uint8_t)strtoul(token, NULL, 16);
+    } else {
+        return -1;
+    }
+
+    // Campo DATA_LENGTH
+    token = strtok(NULL, "|");
+    if (token != NULL) {
+        unsigned int data_length = atoi(token);
+        if (data_length > sizeof(frame->data)) {
+            // Error: DATA_LENGTH fuera de rango
+            return -1;
+        }
+        frame->data_length = (uint16_t)data_length;
+    } else {
+        // Error: Campo DATA_LENGTH faltante
+        return -1;
+    }
+
+    // Campo TIMESTAMP
+    token = strtok(NULL, "|");
+    if (token != NULL) {
+        frame->timestamp = (uint32_t)strtoul(token, NULL, 10);
+    } else {
+        // Error: Campo TIMESTAMP faltante
+        return -1;
+    }
+
+    // Campo CHECKSUM
+    token = strtok(NULL, "|");
+    if (token != NULL) {
+        frame->checksum = (uint16_t)strtoul(token, NULL, 16);
+    } else {
+        // Error: Campo CHECKSUM faltante
+        return -1;
+    }
+
+    // Campo DATA
+    token = strtok(NULL, "|");
+    if (token != NULL) {
+        // Aseguramos que no copiamos más datos de los que podemos manejar
+        size_t dataToCopy = frame->data_length < sizeof(frame->data) - 1 ? frame->data_length : sizeof(frame->data) - 1;
+        strncpy(frame->data, token, dataToCopy);
+        frame->data[dataToCopy] = '\0'; // Aseguramos la terminación nula
+    } else {
+        // Error: Campo DATA faltante
+        return -1;
+    }
+
+    return 0; // Éxito
+}
+
 /***********************************************
 * @Finalitat: Processa una comanda rebuda a Gotham.
 * Identifica el tipus de comanda i executa les accions corresponents.
@@ -290,200 +372,113 @@ void *esperarConexiones(void *arg) { //Utilitzem select() per gestionar tres soc
 *   in: manager = punter al WorkerManager.
 * @Retorn: ----
 ************************************************/
-void processCommandInGotham(const char *command, int client_fd, WorkerManager *manager) {
-    // Depuración del comando recibido
-    printF("\033[34m[DEBUG]: Comando completo recibido: ");
-    printF(command);
-    printF("\033[0m\n");
+void processCommandInGotham(const char *frame_buffer, int client_fd, WorkerManager *manager) {
+    Frame frame;
+    deserialize_frame(frame_buffer, &frame);
+    printf("[DEBUG]: Frame deserialitzat a Gotham - type: %02x, data: %s\n", frame.type, frame.data);
 
-    // Limpiar prefijo numérico (si existe)
-    const char *cleanCommand = command;
-    if (isdigit(command[0])) {
-        cleanCommand = strchr(command, '|'); // Buscar el separador '|'
-        if (cleanCommand) {
-            cleanCommand++; // Saltar el '|'
-        } else {
-            cleanCommand = command; // Si no hay '|', usar el comando completo
-        }
-    }
+    // Validar checksum solo sobre los datos del frame
+    uint16_t calculated_checksum = calculate_checksum(frame.data, frame.data_length);
+    if (calculated_checksum != frame.checksum) {
+        logError("Trama amb checksum invàlid.");
+        Frame response = {.type = 0xFF, .data_length = 0, .timestamp = time(NULL)};
+        response.checksum = calculate_checksum(response.data, response.data_length);
 
-    // Depuración del comando limpio
-    printF("\033[34m[DEBUG]: Comando limpio: ");
-    printF(cleanCommand);
-    printF("\033[0m\n");
-
-    // Crear una copia del comando porque strtok modificará la cadena
-    char *commandCopy = strdup(cleanCommand);
-    if (!commandCopy) {
-        char *error_msg = strdup("\033[31m[ERROR]: Error duplicant la comanda\033[0m\n");
-        if (error_msg) {
-            printF(error_msg);
-            free(error_msg);
-        }
-        send_frame(client_fd, "ERROR COMMAND", strlen("ERROR COMMAND"));
+        char buffer[FRAME_SIZE];
+        serialize_frame(&response, buffer);
+        write(client_fd, buffer, FRAME_SIZE);
         return;
     }
+    printf("[DEBUG]: Tipus de frame rebut: %02x\n", frame.type);
+    switch (frame.type) {
+        case 0x01: // CONNECT
+            logSuccess("Client connectat correctament.");
+            Frame ack_frame = {.type = 0x01, .timestamp = time(NULL)};
+            strncpy(ack_frame.data, "CONN_OK", sizeof(ack_frame.data) - 1);
+            ack_frame.data_length = strlen(ack_frame.data);
+            ack_frame.checksum = calculate_checksum(ack_frame.data, ack_frame.data_length);
 
-    // Separar la comanda en campos utilizando '&' o '|'
-    char *token = strtok(commandCopy, "&|");
-    if (!token) {
-        char *warning_msg = strdup("\033[33m[WARNING]: Comanda rebuda sense contingut vàlid\033[0m\n");
-        if (warning_msg) {
-            printF(warning_msg);
-            free(warning_msg);
-        }
-        free(commandCopy);
-        send_frame(client_fd, "ERROR COMMAND", strlen("ERROR COMMAND"));
-        return;
+            char ack_buffer[FRAME_SIZE];
+            serialize_frame(&ack_frame, ack_buffer);
+            write(client_fd, ack_buffer, FRAME_SIZE);
+            break;
+
+        case 0x02: // REGISTER
+            logInfo("[DEBUG]: Processant registre de worker...");
+            registrarWorker(frame.data, manager, client_fd);
+            Frame response = {.type = 0x02, .data_length = 0, .timestamp = time(NULL)};
+            strncpy(response.data, "CON_OK", sizeof(response.data) - 1);
+            response.data_length = strlen(response.data);
+            response.checksum = calculate_checksum(response.data, response.data_length);
+
+            char buffer[FRAME_SIZE];
+            serialize_frame(&response, buffer);
+            write(client_fd, buffer, FRAME_SIZE);
+            break;
+
+        case 0x10: // DISTORT
+            logInfo("[DEBUG]: Processant DISTORT...");
+
+            char workerIP[16];
+            int workerPort;
+            pthread_mutex_lock(&manager->mutex);
+            int workerFound = buscarWorker("MEDIA", manager, workerIP, &workerPort);
+            pthread_mutex_unlock(&manager->mutex);
+
+            if (workerFound == 0) {
+                logInfo("[INFO]: Worker trobat. Redirigint comanda...");
+
+                int workerSocket = connect_to_server(workerIP, workerPort);
+                if (workerSocket >= 0) {
+                    write(workerSocket, frame_buffer, FRAME_SIZE);
+
+                    char workerResponse[FRAME_SIZE];
+                    if (read(workerSocket, workerResponse, FRAME_SIZE) > 0) {
+                        logInfo("[DEBUG]: Resposta del worker:");
+                        logInfo(workerResponse);
+
+                        write(client_fd, workerResponse, FRAME_SIZE); // Envia la resposta a Fleck
+                        close(workerSocket);
+                    } else {
+                        logError("[ERROR]: Worker no ha respost.");
+                        send_frame(client_fd, "DISTORT_KO", strlen("DISTORT_KO"));
+                    }
+                } else {
+                    logError("[ERROR]: No s'ha pogut connectar al worker.");
+                    send_frame(client_fd, "DISTORT_KO", strlen("DISTORT_KO"));
+                }
+            } else {
+                logError("[ERROR]: Cap worker disponible.");
+                send_frame(client_fd, "DISTORT_KO", strlen("DISTORT_KO"));
+            }
+            break;
+
+        case 0x20: // CHECK STATUS
+            logSuccess("Processant CHECK STATUS...");
+            Frame status_frame = {.type = 0x20, .data_length = 0, .timestamp = time(NULL)};
+            status_frame.checksum = calculate_checksum(status_frame.data, status_frame.data_length);
+
+            char status_buffer[FRAME_SIZE];
+            serialize_frame(&status_frame, status_buffer);
+            write(client_fd, status_buffer, FRAME_SIZE);
+            break;
+
+        case 0x30: //DISTORT
+            break;
+
+        default: 
+            logError("Comanda desconeguda rebuda.");
+            Frame error_frame = {.type = 0xFF, .data_length = 0, .timestamp = time(NULL)};
+            strncpy(error_frame.data, "CMD_KO", sizeof(error_frame.data) - 1);
+            error_frame.data_length = strlen(error_frame.data);
+            error_frame.checksum = calculate_checksum(error_frame.data, error_frame.data_length);
+
+            char error_buffer[FRAME_SIZE];
+            serialize_frame(&error_frame, error_buffer);
+            write(client_fd, error_buffer, FRAME_SIZE);
+            break;
     }
-
-    printF("\033[34m[DEBUG]: Token inicial: ");
-    printF(token);
-    printF("\033[0m\n");
-
-    // Analizar e identificar el tipo de comando
-    if (strcasecmp(token, "REGISTER WORKER") == 0) {
-        // Procesar el registro del worker
-        char *workerType = strtok(NULL, "&");
-        char *workerIP = strtok(NULL, "&");
-        char *workerPortStr = strtok(NULL, "&");
-
-        if (!workerType || !workerIP || !workerPortStr) {
-            logError("Dades incompletes per registrar el worker.");
-            send_frame(client_fd, "CON_KO", strlen("CON_KO"));
-            free(commandCopy);
-            return;
-        }
-
-        int workerPort = atoi(workerPortStr);
-
-        // Añadir el worker a la lista
-        pthread_mutex_lock(&manager->mutex);
-        if (manager->workerCount == manager->capacity) {
-            manager->capacity *= 2;
-            WorkerInfo *newWorkers = realloc(manager->workers, manager->capacity * sizeof(WorkerInfo));
-            if (!newWorkers) {
-                logError("Error ampliant la capacitat de la llista de workers.");
-                pthread_mutex_unlock(&manager->mutex);
-                send_frame(client_fd, "CON_KO", strlen("CON_KO"));
-                free(commandCopy);
-                return;
-            }
-            manager->workers = newWorkers;
-        }
-
-        WorkerInfo *worker = &manager->workers[manager->workerCount++];
-        strncpy(worker->type, workerType, sizeof(worker->type) - 1);
-        strncpy(worker->ip, workerIP, sizeof(worker->ip) - 1);
-        worker->port = workerPort;
-        worker->socket_fd = client_fd;
-        pthread_mutex_unlock(&manager->mutex);
-
-        logSuccess("Worker registrat correctament.");
-        send_frame(client_fd, "CON_OK", strlen("CON_OK"));
-
-    } else if (strcasecmp(token, "CONNECT") == 0) {
-        send_frame(client_fd, "ACK", strlen("ACK"));
-        char *connect_msg = strdup("\033[32m[SUCCESS]: Client connectat correctament.\033[0m\n");
-        if (connect_msg) {
-            printF(connect_msg);
-            free(connect_msg);
-        }
-
-    } else if (strcasecmp(token, "DISTORT") == 0) {
-        // Comanda DISTORT
-        char *fileName = strtok(NULL, "&");
-        char *factorStr = strtok(NULL, "&");
-
-        if (!fileName || !factorStr) {
-            char *error_msg = strdup("\033[31m[ERROR]: Falten camps per DISTORT.\033[0m\n");
-            if (error_msg) {
-                printF(error_msg);
-                free(error_msg);
-            }
-            send_frame(client_fd, "DISTORT_KO", strlen("DISTORT_KO"));
-            free(commandCopy);
-            return;
-        }
-
-        int factor = atoi(factorStr);
-
-        char workerIP[16] = {0};
-        int workerPort = 0;
-
-        pthread_mutex_lock(&manager->mutex);
-        int result = buscarWorker("MEDIA", manager, workerIP, &workerPort);
-        pthread_mutex_unlock(&manager->mutex);
-
-        if (result == 0) {
-            char response[FRAME_SIZE];
-            snprintf(response, FRAME_SIZE, "DISTORT_OK&%s&%d&%d", workerIP, workerPort, factor);
-            send_frame(client_fd, response, strlen(response));
-            char *distort_msg = strdup("\033[36m[INFO]: DISTORT redirigit correctament.\033[0m\n");
-            if (distort_msg) {
-                printF(distort_msg);
-                free(distort_msg);
-            }
-        } else {
-            send_frame(client_fd, "DISTORT_KO", strlen("DISTORT_KO"));
-            char *warning_msg = strdup("\033[33m[WARNING]: No hi ha workers disponibles per DISTORT.\033[0m\n");
-            if (warning_msg) {
-                printF(warning_msg);
-                free(warning_msg);
-            }
-        }
-
-    } else if (strcasecmp(token, "CHECK STATUS") == 0) {
-        send_frame(client_fd, "STATUS OK ACK", strlen("STATUS OK ACK"));
-        char *status_msg = strdup("\033[32m[SUCCESS]: Sol·licitud de CHECK STATUS processada.\033[0m\n");
-        if (status_msg) {
-            printF(status_msg);
-            free(status_msg);
-        }
-
-    } else if (strcasecmp(token, "CLEAR ALL") == 0) {
-        send_frame(client_fd, "ACK CLEAR ALL", strlen("ACK CLEAR ALL"));
-        char *clear_msg = strdup("\033[35m[INFO]: Sol·licitud de CLEAR ALL rebuda i processada.\033[0m\n");
-        if (clear_msg) {
-            printF(clear_msg);
-            free(clear_msg);
-        }
-
-    } else if (strcasecmp(token, "LOGOUT") == 0) {
-        pthread_mutex_lock(&manager->mutex);
-        int result = logoutWorkerBySocket(client_fd, manager);
-        pthread_mutex_unlock(&manager->mutex);
-
-        if (result == 0) {
-            send_frame(client_fd, "ACK LOGOUT", strlen("ACK LOGOUT"));
-            char *logout_msg = strdup("\033[32m[SUCCESS]: Worker eliminat del registre.\033[0m\n");
-            if (logout_msg) {
-                printF(logout_msg);
-                free(logout_msg);
-            }
-        } else {
-            send_frame(client_fd, "ERROR LOGOUT", strlen("ERROR LOGOUT"));
-            char *error_msg = strdup("\033[31m[ERROR]: Error eliminant el worker del registre.\033[0m\n");
-            if (error_msg) {
-                printF(error_msg);
-                free(error_msg);
-            }
-        }
-
-    } else {
-        send_frame(client_fd, "ERROR COMMAND", strlen("ERROR COMMAND"));
-        char *unknown_msg = strdup("\033[31m[ERROR]: Comanda desconeguda rebuda.\033[0m\n");
-        if (unknown_msg) {
-            printF(unknown_msg);
-            free(unknown_msg);
-        }
-    }
-
-    free(commandCopy); // Liberar memoria de la copia
 }
-
-
-
 
 /***********************************************
 * @Finalitat: Registra un nou worker a Gotham.
@@ -494,52 +489,70 @@ void processCommandInGotham(const char *command, int client_fd, WorkerManager *m
 * @Retorn: ----
 ************************************************/
 void registrarWorker(const char *payload, WorkerManager *manager, int client_fd) {
-    char ip[16] = {0}, type[10] = {0};
+    char type[10] = {0}, ip[16] = {0};
     int port = 0;
 
-    // Parsejar la informació del payload utilitzant strtok
-    char *payloadCopy = strdup(payload); // Feu una còpia per no modificar l'original
+    // Hacemos una copia del payload para no modificar la original
+    char *payloadCopy = strdup(payload);
     if (!payloadCopy) {
-        perror("Error duplicant el payload");
+        logError("Error duplicando el payload.");
         return;
     }
 
-    char *token = strtok(payloadCopy, " ");
+    // Utilizamos strtok para dividir el payload por '&'
+    char *token = strtok(payloadCopy, "&");
+    if (token) {
+        strncpy(type, token, sizeof(type) - 1);
+    } else {
+        logError("Error al parsear el tipo de worker.");
+        free(payloadCopy);
+        return;
+    }
+
+    token = strtok(NULL, "&");
     if (token) {
         strncpy(ip, token, sizeof(ip) - 1);
-        token = strtok(NULL, " ");
-        if (token) {
-            port = atoi(token); // Convertir el port en un número
-            token = strtok(NULL, " ");
-            if (token) {
-                strncpy(type, token, sizeof(type) - 1);
-            }
-        }
+    } else {
+        logError("Error al parsear la IP del worker.");
+        free(payloadCopy);
+        return;
     }
-    free(payloadCopy); // Allibera la memòria de la còpia
+
+    token = strtok(NULL, "&");
+    if (token) {
+        port = atoi(token);
+    } else {
+        logError("Error al parsear el puerto del worker.");
+        free(payloadCopy);
+        return;
+    }
+
+    free(payloadCopy);
 
     pthread_mutex_lock(&manager->mutex);
 
-    // Comprovar si cal ampliar la capacitat
+    // Comprobar si es necesario ampliar la capacidad
     if (manager->workerCount == manager->capacity) {
-        manager->capacity *= 2; // Duplicar la capacitat
+        manager->capacity *= 2;
         WorkerInfo *newWorkers = realloc(manager->workers, manager->capacity * sizeof(WorkerInfo));
         if (!newWorkers) {
-            perror("Error ampliant la llista de workers");
+            logError("Error ampliando la lista de workers.");
             pthread_mutex_unlock(&manager->mutex);
             return;
         }
         manager->workers = newWorkers;
     }
 
-    // Afegir el nou worker
+    // Añadir el nuevo worker
     WorkerInfo *worker = &manager->workers[manager->workerCount++];
-    strncpy(worker->ip, ip, sizeof(worker->ip));
+    strncpy(worker->type, type, sizeof(worker->type) - 1);
+    strncpy(worker->ip, ip, sizeof(worker->ip) - 1);
     worker->port = port;
-    strncpy(worker->type, type, sizeof(worker->type));
     worker->socket_fd = client_fd;
 
     pthread_mutex_unlock(&manager->mutex);
+
+    logSuccess("Worker registrado correctamente en Gotham.");
 }
 
 /***********************************************
@@ -553,12 +566,19 @@ void registrarWorker(const char *payload, WorkerManager *manager, int client_fd)
 ************************************************/
 int buscarWorker(const char *type, WorkerManager *manager, char *ip, int *port) {
     for (int i = 0; i < manager->workerCount; i++) {
-        if (strcmp(manager->workers[i].type, type) == 0) {
+        if (strcasecmp(manager->workers[i].type, type) == 0) {
             strncpy(ip, manager->workers[i].ip, 16);
             *port = manager->workers[i].port;
+            printF("[INFO]: Worker trobat: ");
+            printF(ip);
+            printF(":");
+            char portDebug[10];
+            snprintf(portDebug, 10, "%d\n", *port);
+            printF(portDebug);
             return 0;
         }
     }
+    printF("[DEBUG]: No hi ha workers disponibles del tipus sol·licitat.\n");
     return -1;
 }
 

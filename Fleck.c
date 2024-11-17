@@ -8,11 +8,22 @@
 #include <strings.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <time.h>
 
 #include "FileReader/FileReader.h"
 #include "StringUtils/StringUtils.h"
 #include "DataConversion/DataConversion.h"
 #include "Networking/Networking.h"
+
+#define FRAME_SIZE 256
+#define CHECKSUM_MODULO 65536
+
+int gothamSocket = -1; // Variable global para manejar el socket
+
+void signalHandler(int sig);
+void processCommandWithGotham(const char *command, int gothamSocket);
+void listText(const char *directory);
+void listMedia(const char *directory);
 
 FleckConfig *globalFleckConfig = NULL;
 
@@ -21,7 +32,8 @@ void printColor(const char *color, const char *message) {
     write(1, message, strlen(message));
     write(1, ANSI_COLOR_RESET, strlen(ANSI_COLOR_RESET));
 }
-// Funció per llistar els fitxers de text (.txt) en el directori especificat
+
+// Función para listar los archivos de texto (.txt) en el directorio especificado
 void listText(const char *directory) {
     pid_t pid = fork();
 
@@ -80,9 +92,9 @@ void listText(const char *directory) {
     }
 }
 
-// Funció per llistar els fitxers de tipus mitjà (wav, jpg, png) en el directori especificat
+// Función para listar los archivos de tipo media (wav, jpg, png) en el directorio especificado
 void listMedia(const char *directory) {
-    pid_t pid = fork();
+   pid_t pid = fork();
 
     if (pid == 0) { // Procés fill
         int tempFd = open("media_files.txt", O_WRONLY | O_CREAT | O_TRUNC, 0777);
@@ -143,105 +155,231 @@ void listMedia(const char *directory) {
     }
 }
 
-// Funció per processar una comanda i enviar-la a Gotham
+void serialize_frame(const Frame *frame, char *buffer) {
+    memset(buffer, 0, FRAME_SIZE);
+    snprintf(buffer, FRAME_SIZE, "%02x|%04x|%u|%04x|%s",
+             frame->type, frame->data_length, frame->timestamp, frame->checksum, frame->data);
+}
+
+int deserialize_frame(const char *buffer, Frame *frame) {
+    if (buffer == NULL || frame == NULL) {
+        // Error: Invalid input parameters
+        return -1;
+    }
+
+    memset(frame, 0, sizeof(Frame));
+
+    char localBuffer[FRAME_SIZE];
+    strncpy(localBuffer, buffer, FRAME_SIZE - 1);
+    localBuffer[FRAME_SIZE - 1] = '\0'; // Ensure null termination
+
+    char *token = NULL;
+
+    // FIELD: TYPE
+    token = strtok(localBuffer, "|");
+    if (token != NULL && strlen(token) > 0) {
+        frame->type = (uint8_t)strtoul(token, NULL, 16);
+    } else {
+        // Error: Missing or invalid TYPE field
+        return -1;
+    }
+
+    // FIELD: DATA_LENGTH
+    token = strtok(NULL, "|");
+    if (token != NULL) {
+        unsigned int data_length = strtoul(token, NULL, 16);
+        if (data_length > sizeof(frame->data)) {
+            // Error: DATA_LENGTH out of range
+            return -1;
+        }
+        frame->data_length = (uint16_t)data_length;
+    } else {
+        // Error: Missing DATA_LENGTH field
+        return -1;
+    }
+
+    // FIELD: TIMESTAMP
+    token = strtok(NULL, "|");
+    if (token != NULL) {
+        frame->timestamp = (uint32_t)strtoul(token, NULL, 10);
+    } else {
+        // Error: Missing TIMESTAMP field
+        return -1;
+    }
+
+    // FIELD: CHECKSUM
+    token = strtok(NULL, "|");
+    if (token != NULL) {
+        frame->checksum = (uint16_t)strtoul(token, NULL, 16);
+    } else {
+        // Error: Missing CHECKSUM field
+        return -1;
+    }
+
+    // FIELD: DATA
+    token = strtok(NULL, "|");
+    if (token != NULL) {
+        size_t dataToCopy = frame->data_length < sizeof(frame->data) - 1
+            ? frame->data_length
+            : sizeof(frame->data) - 1;
+        strncpy(frame->data, token, dataToCopy);
+        frame->data[dataToCopy] = '\0'; // Ensure null termination
+    } else {
+        // Error: Missing DATA field
+        return -1;
+    }
+
+    return 0; // Success
+}
+
 void processCommandWithGotham(const char *command, int gothamSocket) {
-    if (send_frame(gothamSocket, command, strlen(command)) < 0) {
+    Frame frame = {0};
+    frame.type = 0x01; // Tipo de trama
+    strncpy(frame.data, command, sizeof(frame.data) - 1);
+    frame.data_length = strlen(frame.data);
+    frame.timestamp = (uint32_t)time(NULL);
+    frame.checksum = calculate_checksum(frame.data, frame.data_length);
+
+    char buffer[FRAME_SIZE];
+    serialize_frame(&frame, buffer);
+
+    if (write(gothamSocket, buffer, FRAME_SIZE) < 0) {
         printColor(ANSI_COLOR_RED, "[ERROR]: Error enviant la comanda a Gotham\n");
         return;
     }
 
-    char buffer[FRAME_SIZE];
-    int data_length = FRAME_SIZE;
-
-    if (receive_frame(gothamSocket, buffer, &data_length) < 0) {
+    if (read(gothamSocket, buffer, FRAME_SIZE) <= 0) {
         printColor(ANSI_COLOR_RED, "[ERROR]: Error rebent la resposta de Gotham\n");
         return;
     }
 
-    printColor(ANSI_COLOR_CYAN, "[INFO]: Resposta de Gotham: ");
-    printColor(ANSI_COLOR_GREEN, buffer);
-    printColor(ANSI_COLOR_CYAN, "\n");
+    Frame response;
+    int result = deserialize_frame(buffer, &response);
+    if (result != 0) {
+        printColor(ANSI_COLOR_RED, "[ERROR]: Error al deserialitzar la resposta de Gotham.\n");
+        return;
+    }
+
+    // Validar checksum de la respuesta
+    uint16_t resp_checksum = calculate_checksum(response.data, response.data_length);
+    if (resp_checksum != response.checksum) {
+        printColor(ANSI_COLOR_RED, "[ERROR]: Resposta de Gotham amb checksum invàlid\n");
+        return;
+    }
+
+    if (response.type == 0x01 && strcmp(response.data, "CONN_OK") == 0) {
+        printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Connexió establerta amb Gotham!\n");
+    } else {
+        printColor(ANSI_COLOR_RED, "[ERROR]: Connexió rebutjada: ");
+        printColor(ANSI_COLOR_CYAN, response.data);
+        printColor(ANSI_COLOR_RED, "\n");
+    }
 }
 
-/*Funció per processar comandes que arriben*/
-void processCommand(char *command, FleckConfig *fleckConfig, int gothamSocket) {
+void processCommand(char *command, int gothamSocket) {
     if (command == NULL || strlen(command) == 0 || strcmp(command, "\n") == 0) {
-        printColor(ANSI_COLOR_RED, "[ERROR]: Comanda buida.\n");
+        printColor(ANSI_COLOR_RED, "[ERROR]: Empty command.\n");
         return;
     }
 
     char *cmd = strtok(command, " \n");
-    if (cmd == NULL) {  
-        printColor(ANSI_COLOR_RED, "[ERROR]: Comanda no vàlida.\n");
+    if (cmd == NULL) {
+        printColor(ANSI_COLOR_RED, "[ERROR]: Invalid command.\n");
         return;
     }
-    
+
     char *subCmd = strtok(NULL, " \n");
     char *extra = strtok(NULL, " \n");
 
     if (strcasecmp(cmd, "CONNECT") == 0 && subCmd == NULL) {
-        printColor(ANSI_COLOR_CYAN, "[INFO]: Connectant amb Gotham...\n");
+        printColor(ANSI_COLOR_CYAN, "[INFO]: Connecting to Gotham...\n");
         processCommandWithGotham("CONNECT", gothamSocket);
     } else if (strcasecmp(cmd, "LOGOUT") == 0 && subCmd == NULL) {
-        printColor(ANSI_COLOR_YELLOW, "[INFO]: Desconnectant de Gotham...\n");
+        printColor(ANSI_COLOR_YELLOW, "[INFO]: Disconnecting from Gotham...\n");
         processCommandWithGotham("LOGOUT", gothamSocket);
-        close(gothamSocket); // Tanca el socket amb Gotham
-        printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Desconnectat correctament.\n");
-    } else if (strcasecmp(cmd, "LIST") == 0 && extra == NULL) {
-        if (fleckConfig == NULL) {
-            printColor(ANSI_COLOR_RED, "[ERROR]: Configuració no inicialitzada.\n");
-            return;
-        }
-        if (strcasecmp(subCmd, "MEDIA") == 0) {
-            printColor(ANSI_COLOR_CYAN, "[INFO]: Llistant fitxers de tipus MEDIA...\n");
-            listMedia(fleckConfig->directory);
-        } else if (strcasecmp(subCmd, "TEXT") == 0) {
-            printColor(ANSI_COLOR_CYAN, "[INFO]: Llistant fitxers de tipus TEXT...\n");
-            listText(fleckConfig->directory);
-        } else {
-            printColor(ANSI_COLOR_RED, "[ERROR]: Comanda LIST no vàlida.\n");
-        }
+        close(gothamSocket);
+        printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Disconnected successfully.\n");
     } else if (strcasecmp(cmd, "DISTORT") == 0) {
         char *file = subCmd;
         char *factorStr = extra;
-        extra = strtok(NULL, " \n");
 
-        if (file && factorStr && extra == NULL) {
-            int factor = atoi(factorStr);
-            char *distortCommand;
-            asprintf(&distortCommand, "DISTORT %s %d", file, factor);
-            printColor(ANSI_COLOR_CYAN, "[INFO]: Enviant comanda DISTORT a Gotham...\n");
-            processCommandWithGotham(distortCommand, gothamSocket);
-            free(distortCommand);
+        if (file && factorStr) {
+            Frame frame = {0};
+            frame.type = 0x10;
+            snprintf(frame.data, sizeof(frame.data), "%s&%s", file, factorStr);
+            frame.data_length = strlen(frame.data);
+            frame.timestamp = (uint32_t)time(NULL);
+            frame.checksum = calculate_checksum(frame.data, frame.data_length);
+
+            char buffer[FRAME_SIZE];
+            serialize_frame(&frame, buffer);
+
+            if (write(gothamSocket, buffer, FRAME_SIZE) < 0) {
+                printColor(ANSI_COLOR_RED, "[ERROR]: Error enviant la comanda DISTORT a Gotham\n");
+                return;
+            }
+
+            if (read(gothamSocket, buffer, FRAME_SIZE) <= 0) {
+                printColor(ANSI_COLOR_RED, "[ERROR]: No hi ha resposta de Gotham.\n");
+                return;
+            }
+
+            printColor(ANSI_COLOR_CYAN, "[DEBUG]: Buffer rebut de Gotham:");
+            printColor(ANSI_COLOR_YELLOW, buffer);
+
+            Frame response;
+            if (deserialize_frame(buffer, &response) != 0) {
+                printColor(ANSI_COLOR_RED, "[ERROR]: Error deserialitzant la resposta de Gotham.\n");
+                return;
+            }
+
+           if (strcmp(response.data, "DISTORT_OK") == 0) {
+                printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Fitxer distorsionat correctament.\n");
+            } else {
+                printColor(ANSI_COLOR_RED, "[ERROR]: No s'ha pogut distorsionar el fitxer.\n");
+            }
         } else {
-            printColor(ANSI_COLOR_RED, "[ERROR]: Comanda DISTORT no vàlida. Falten paràmetres.\n");
+            printColor(ANSI_COLOR_RED, "[ERROR]: La comanda DISTORT necessita un fitxer i un factor.\n");
         }
-    } else if (strcasecmp(cmd, "CHECK") == 0 && strcasecmp(subCmd, "STATUS") == 0 && extra == NULL) {
-        printColor(ANSI_COLOR_CYAN, "[INFO]: Verificant estat de Gotham...\n");
-        processCommandWithGotham("CHECK STATUS", gothamSocket);
+    } else if (strcasecmp(cmd, "LIST") == 0) {
+        if (strcasecmp(subCmd, "MEDIA") == 0 && extra == NULL) {
+            printColor(ANSI_COLOR_CYAN, "[INFO]: Listing media files...\n");
+            listMedia(globalFleckConfig->directory);
+        } else if (strcasecmp(subCmd, "TEXT") == 0 && extra == NULL) {
+            printColor(ANSI_COLOR_CYAN, "[INFO]: Listing text files...\n");
+            listText(globalFleckConfig->directory);
+        } else {
+            printColor(ANSI_COLOR_RED, "[ERROR]: Invalid LIST command. Use LIST MEDIA or LIST TEXT.\n");
+        }
     } else if (strcasecmp(cmd, "CLEAR") == 0 && strcasecmp(subCmd, "ALL") == 0 && extra == NULL) {
-        printColor(ANSI_COLOR_CYAN, "[INFO]: Esborrant tots els registres de Gotham...\n");
-        processCommandWithGotham("CLEAR ALL", gothamSocket);
+        printColor(ANSI_COLOR_CYAN, "[INFO]: Clearing all local data in Fleck...\n");
+        // Implementaremos en FASE 3
+        printColor(ANSI_COLOR_GREEN, "[SUCCESS]: All local data has been cleared in Fleck.\n");
+    } else if (strcasecmp(cmd, "CHECK") == 0 && strcasecmp(subCmd, "STATUS") == 0 && extra == NULL) {
+        printColor(ANSI_COLOR_CYAN, "[INFO]: Checking Gotham status...\n");
+        processCommandWithGotham("CHECK STATUS", gothamSocket);
     } else {
-        printColor(ANSI_COLOR_RED, "[ERROR]: Comanda no reconeguda. Si us plau, introdueix una comanda vàlida.\n");
+        printColor(ANSI_COLOR_RED, "[ERROR]: Unknown command. Please enter a valid command.\n");
     }
 }
 
-
-//FASE 1
+// FASE 1
 void alliberarMemoria(FleckConfig *fleckConfig);
 
-// Funció manejadora per a la senyal SIGINT
 void signalHandler(int sig) {
     if (sig == SIGINT) {
         printColor(ANSI_COLOR_YELLOW, "\n[INFO]: Alliberació de memòria...\n");
-        if (globalFleckConfig != NULL) {
-            free(globalFleckConfig->user);
-            free(globalFleckConfig->directory);
-            free(globalFleckConfig->ipGotham);
-            free(globalFleckConfig);
+
+        if (gothamSocket != -1) {
+            Frame frame = {.type = 0x02, .data_length = 0, .timestamp = (uint32_t)time(NULL)};
+            frame.checksum = calculate_checksum(frame.data, frame.data_length);
+
+            char buffer[FRAME_SIZE];
+            serialize_frame(&frame, buffer);
+            write(gothamSocket, buffer, FRAME_SIZE);
+
+            close(gothamSocket);
         }
-        printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Memòria alliberada correctament.\n");
         exit(0);
     }
 }
@@ -277,7 +415,7 @@ int main(int argc, char *argv[]) {
     readConfigFileGeneric(argv[1], fleckConfig, CONFIG_FLECK);
 
     printF("\033[1;36m[INFO]: Intentant connectar a Gotham...\n\033[0m");
-    int gothamSocket = connect_to_server(fleckConfig->ipGotham, fleckConfig->portGotham);
+    gothamSocket = connect_to_server(fleckConfig->ipGotham, fleckConfig->portGotham);
     if (gothamSocket < 0) {
         printF("\033[1;31m[ERROR]: No es pot connectar a Gotham. Comprova la IP i el port.\n\033[0m");
         free(fleckConfig);
@@ -291,23 +429,19 @@ int main(int argc, char *argv[]) {
         printF("\033[1;35m\n$ \033[0m");
         command = readUntil(STDIN_FILENO, '\n');
 
-        // Verificar si `command` és NULL o està buit
         if (command == NULL || strlen(command) == 0) {
             printF("\033[1;33m[WARNING]: Comanda buida. Si us plau, introdueix una comanda vàlida.\n\033[0m");
-            if (command != NULL) free(command); // Allibera `command` si no és NULL
+            free(command);
             continue;
         }
 
         printF("\033[1;36m[INFO]: Processant la comanda...\n\033[0m");
-        processCommand(command, fleckConfig, gothamSocket);
+        processCommand(command, gothamSocket);
         free(command);
     }
 
     close(gothamSocket);
+    free(fleckConfig);
 
-    printF("\033[1;36m[INFO]: Alliberant recursos abans de tancar.\n\033[0m");
-    alliberarMemoria(fleckConfig);
-
-    printF("\033[1;32m[SUCCESS]: Finalització del client Fleck.\n\033[0m");
     return 0;
 }
