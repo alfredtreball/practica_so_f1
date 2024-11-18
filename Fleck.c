@@ -35,31 +35,55 @@ void printColor(const char *color, const char *message) {
 
 // Función para listar los archivos de texto (.txt) en el directorio especificado
 void listText(const char *directory) {
+    if (!directory) {
+        printF("[ERROR]: Directory is NULL.\n");
+        return;
+    }
+
     pid_t pid = fork();
 
-    if (pid == 0) { // Procés fill
+    if (pid == 0) { // Proceso hijo
+        // Abrir un archivo temporal para guardar los resultados
         int tempFd = open("text_files.txt", O_WRONLY | O_CREAT | O_TRUNC, 0777);
         if (tempFd == -1) {
-            printF("Error obrint el fitxer temporal\n");
-            exit(1);
+            perror("[ERROR]: Unable to open temporary file");
+            exit(EXIT_FAILURE);
         }
-        dup2(tempFd, STDOUT_FILENO); // Redirigeix la sortida estàndard al fitxer temporal
+
+        // Redirigir la salida estándar al archivo temporal
+        dup2(tempFd, STDOUT_FILENO);
         close(tempFd);
 
-        char *args[] = {"/usr/bin/find", (char *)directory, "-type", "f", "-name", "*.txt", "-exec", "basename", "{}", ";", NULL};
+        // Comando para encontrar archivos de texto
+        char *args[] = {
+            "/usr/bin/find", (char *)directory, "-type", "f", "-name", "*.txt", "-exec", "basename", "{}", ";", NULL
+        };
         execv(args[0], args);
 
-        printF("Error executant find\n"); // Si execv falla
-        exit(1);
-    } else if (pid > 0) { // Procés pare
-        wait(NULL);
-
-        int tempFd = open("text_files.txt", O_RDONLY);
-        if (tempFd == -1) {
-            printF("Error obrint el fitxer temporal\n");
+        // Si execv falla
+        perror("[ERROR]: execv failed");
+        exit(EXIT_FAILURE);
+    } else if (pid > 0) { // Proceso padre
+        // Esperar a que el proceso hijo termine
+        int status;
+        if (waitpid(pid, &status, 0) == -1) {
+            perror("[ERROR]: waitpid failed");
             return;
         }
 
+        if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+            printF("[ERROR]: Child process exited with error.\n");
+            return;
+        }
+
+        // Leer el archivo temporal
+        int tempFd = open("text_files.txt", O_RDONLY);
+        if (tempFd == -1) {
+            perror("[ERROR]: Unable to open temporary file for reading");
+            return;
+        }
+
+        // Contar y mostrar los resultados
         int count = 0;
         char *line;
         while ((line = readUntil(tempFd, '\n')) != NULL) {
@@ -67,7 +91,7 @@ void listText(const char *directory) {
             free(line);
         }
 
-        char *countStr = intToStr(count); 
+        char *countStr = intToStr(count);
         printF("There are ");
         printF(countStr);
         printF(" text files available:\n");
@@ -88,41 +112,63 @@ void listText(const char *directory) {
 
         close(tempFd);
     } else {
-        printF("Error en fork\n");
+        perror("[ERROR]: fork failed");
     }
 }
 
-// Función para listar los archivos de tipo media (wav, jpg, png) en el directorio especificado
+// Función para listar archivos multimedia
 void listMedia(const char *directory) {
-   pid_t pid = fork();
+    if (!directory) {
+        printF("[ERROR]: Directory is NULL.\n");
+        return;
+    }
 
-    if (pid == 0) { // Procés fill
+    pid_t pid = fork();
+
+    if (pid == 0) { // Proceso hijo
+        // Abrir un archivo temporal para guardar los resultados
         int tempFd = open("media_files.txt", O_WRONLY | O_CREAT | O_TRUNC, 0777);
         if (tempFd == -1) {
-            printF("Error obrint el fitxer temporal\n");
-            exit(1);
+            perror("[ERROR]: Unable to open temporary file");
+            exit(EXIT_FAILURE);
         }
-        dup2(tempFd, STDOUT_FILENO); 
+
+        // Redirigir la salida estándar al archivo temporal
+        dup2(tempFd, STDOUT_FILENO);
         close(tempFd);
 
+        // Comando para encontrar archivos multimedia
         char *args[] = {
-            "/bin/bash", "-c",
-            "find \"$1\" -type f \\( -name '*.wav' -o -name '*.jpg' -o -name '*.png' \\) -exec basename {} \\;",
-            "bash", (char *)directory, NULL
+            "/usr/bin/find", (char *)directory, "-type", "f",
+            "\\(", "-name", "*.wav", "-o", "-name", "*.jpg", "-o", "-name", "*.png", "\\)",
+            "-exec", "basename", "{}", ";", NULL
         };
         execv(args[0], args);
 
-        printF("Error executant find\n");
-        exit(1);
-    } else if (pid > 0) { 
-        wait(NULL);
-
-        int tempFd = open("media_files.txt", O_RDONLY);
-        if (tempFd == -1) {
-            printF("Error obrint el fitxer temporal\n");
+        // Si execv falla
+        perror("[ERROR]: execv failed");
+        exit(EXIT_FAILURE);
+    } else if (pid > 0) { // Proceso padre
+        // Esperar a que el proceso hijo termine
+        int status;
+        if (waitpid(pid, &status, 0) == -1) {
+            perror("[ERROR]: waitpid failed");
             return;
         }
 
+        if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+            printF("[ERROR]: Child process exited with error.\n");
+            return;
+        }
+
+        // Leer el archivo temporal
+        int tempFd = open("media_files.txt", O_RDONLY);
+        if (tempFd == -1) {
+            perror("[ERROR]: Unable to open temporary file for reading");
+            return;
+        }
+
+        // Contar y mostrar los resultados
         int count = 0;
         char *line;
         while ((line = readUntil(tempFd, '\n')) != NULL) {
@@ -130,7 +176,7 @@ void listMedia(const char *directory) {
             free(line);
         }
 
-        char *countStr = intToStr(count); 
+        char *countStr = intToStr(count);
         printF("There are ");
         printF(countStr);
         printF(" media files available:\n");
@@ -151,7 +197,7 @@ void listMedia(const char *directory) {
 
         close(tempFd);
     } else {
-        printF("Error en fork\n");
+        perror("[ERROR]: fork failed");
     }
 }
 
@@ -234,11 +280,21 @@ int deserialize_frame(const char *buffer, Frame *frame) {
 
 void processCommandWithGotham(const char *command, int gothamSocket) {
     Frame frame = {0};
-    frame.type = 0x01; // Tipo de trama
-    strncpy(frame.data, command, sizeof(frame.data) - 1);
-    frame.data_length = strlen(frame.data);
-    frame.timestamp = (uint32_t)time(NULL);
-    frame.checksum = calculate_checksum(frame.data, frame.data_length);
+    
+    if (strcasecmp(command, "CHECK STATUS") == 0) {
+        // Crear el frame específico para el comando CHECK STATUS
+        frame.type = 0x20; // Tipo específico para CHECK STATUS
+        frame.data_length = 0; // No se envían datos adicionales
+        frame.timestamp = (uint32_t)time(NULL);
+        frame.checksum = calculate_checksum(frame.data, frame.data_length);
+    } else {
+        // Manejo general para otros comandos
+        frame.type = 0x01; // Tipo genérico
+        strncpy(frame.data, command, sizeof(frame.data) - 1);
+        frame.data_length = strlen(frame.data);
+        frame.timestamp = (uint32_t)time(NULL);
+        frame.checksum = calculate_checksum(frame.data, frame.data_length);
+    }
 
     char buffer[FRAME_SIZE];
     serialize_frame(&frame, buffer);
@@ -269,8 +325,10 @@ void processCommandWithGotham(const char *command, int gothamSocket) {
 
     if (response.type == 0x01 && strcmp(response.data, "CONN_OK") == 0) {
         printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Connexió establerta amb Gotham!\n");
+    } else if (response.type == 0x20 && strcmp(response.data, "STATUS_OK") == 0) { // Manejo de CHECK STATUS
+        printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Gotham està funcionant correctament.\n");
     } else {
-        printColor(ANSI_COLOR_RED, "[ERROR]: Connexió rebutjada: ");
+        printColor(ANSI_COLOR_RED, "[ERROR]: Resposta inesperada de Gotham: ");
         printColor(ANSI_COLOR_CYAN, response.data);
         printColor(ANSI_COLOR_RED, "\n");
     }
@@ -313,6 +371,9 @@ void processCommand(char *command, int gothamSocket) {
 
             char buffer[FRAME_SIZE];
             serialize_frame(&frame, buffer);
+            printColor(ANSI_COLOR_CYAN, "[DEBUG]: Enviando frame:");
+            printColor(ANSI_COLOR_YELLOW, buffer);
+            printColor(ANSI_COLOR_RESET, "\n");
 
             if (write(gothamSocket, buffer, FRAME_SIZE) < 0) {
                 printColor(ANSI_COLOR_RED, "[ERROR]: Error enviant la comanda DISTORT a Gotham\n");

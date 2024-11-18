@@ -82,11 +82,24 @@ int startServer(const char *ip, int port) {
 }
 
 int accept_connection(int server_fd) {
-    int client_fd = accept(server_fd, NULL, NULL);
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+
+    int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
     if (client_fd < 0) {
-        perror("Error aceptando la conexión");
+        perror("Error al aceptar la conexión");
         return -1;
     }
+
+    // Obtener IP y puerto del cliente conectado
+    const char *client_ip = inet_ntoa(client_addr.sin_addr);
+    int client_port = ntohs(client_addr.sin_port);
+
+    // Crear el mensaje para la macro printF
+    char logMessage[256];
+    snprintf(logMessage, sizeof(logMessage), "Nueva conexión aceptada desde IP: %s, Puerto: %d\n", client_ip, client_port);
+    printF(logMessage);
+
     return client_fd;
 }
 

@@ -34,80 +34,48 @@ void printColor(const char *color, const char *message) {
 
 // Serialización y deserialización consistentes
 void serialize_frame(const Frame *frame, char *buffer) {
-    memset(buffer, 0, FRAME_SIZE);
-    snprintf(buffer, FRAME_SIZE, "%c|%04hu|%u|%04hx|%s",
-             frame->type, frame->data_length, frame->timestamp, frame->checksum, frame->data);
+    snprintf(buffer, FRAME_SIZE, "%02x|%04d|%u|%04x|%s",
+             frame->type, frame->data_length, frame->timestamp,
+             frame->checksum, frame->data);
 }
 
 int deserialize_frame(const char *buffer, Frame *frame) {
     if (buffer == NULL || frame == NULL) {
-        // Error: Parámetros de entrada inválidos
-        return -1;
+        return -1; // Parámetros inválidos
     }
 
-    memset(frame, 0, sizeof(Frame));
-
-    // Hacemos una copia del buffer para no modificar el original
     char localBuffer[FRAME_SIZE];
     strncpy(localBuffer, buffer, FRAME_SIZE - 1);
-    localBuffer[FRAME_SIZE - 1] = '\0'; // Aseguramos la terminación nula
+    localBuffer[FRAME_SIZE - 1] = '\0'; // Asegurar terminación nula
 
-    char *token = NULL;
+    char *token = strtok(localBuffer, "|");
+    if (!token) return -1;
+    frame->type = (uint8_t)strtoul(token, NULL, 16);
 
-    // Campo TYPE
-    token = strtok(localBuffer, "|");
-    if (token != NULL && strlen(token) > 0) {
-        frame->type = (uint8_t)token[0];
-    } else {
-        // Error: Campo TYPE faltante o inválido
-        return -1;
-    }
-
-    // Campo DATA_LENGTH
     token = strtok(NULL, "|");
-    if (token != NULL) {
-        unsigned int data_length = atoi(token);
-        if (data_length > sizeof(frame->data)) {
-            // Error: DATA_LENGTH fuera de rango
-            return -1;
-        }
-        frame->data_length = (uint16_t)data_length;
-    } else {
-        // Error: Campo DATA_LENGTH faltante
-        return -1;
-    }
+    if (!token) return -1;
+    frame->data_length = (uint16_t)strtoul(token, NULL, 10);
 
-    // Campo TIMESTAMP
     token = strtok(NULL, "|");
-    if (token != NULL) {
-        frame->timestamp = (uint32_t)strtoul(token, NULL, 10);
-    } else {
-        // Error: Campo TIMESTAMP faltante
-        return -1;
-    }
+    if (!token) return -1;
+    frame->timestamp = (uint32_t)strtoul(token, NULL, 10);
 
-    // Campo CHECKSUM
     token = strtok(NULL, "|");
-    if (token != NULL) {
-        frame->checksum = (uint16_t)strtoul(token, NULL, 16);
-    } else {
-        // Error: Campo CHECKSUM faltante
-        return -1;
-    }
+    if (!token) return -1;
+    frame->checksum = (uint16_t)strtoul(token, NULL, 16);
 
-    // Campo DATA
     token = strtok(NULL, "|");
-    if (token != NULL) {
-        // Aseguramos que no copiamos más datos de los que podemos manejar
-        size_t dataToCopy = frame->data_length < sizeof(frame->data) - 1 ? frame->data_length : sizeof(frame->data) - 1;
-        strncpy(frame->data, token, dataToCopy);
-        frame->data[dataToCopy] = '\0'; // Aseguramos la terminación nula
-    } else {
-        // Error: Campo DATA faltante
-        return -1;
+    if (!token) return -1;
+    strncpy(frame->data, token, frame->data_length);
+    frame->data[frame->data_length] = '\0'; // Terminación nula
+
+    // Validar checksum
+    uint16_t calculated_checksum = calculate_checksum(frame->data, frame->data_length);
+    if (calculated_checksum != frame->checksum) {
+        return -1; // Checksum inválido
     }
 
-    return 0; // Éxito
+    return 0; // Frame válido
 }
 
 // Implementación de processReceivedFrame
@@ -186,23 +154,20 @@ int main(int argc, char *argv[]) {
 
     // Enviar frame de registro
     Frame frame;
-    memset(&frame, 0, sizeof(Frame));
-    frame.type = 0x02; // Tipo de frame para REGISTER
+    char buffer[FRAME_SIZE];
 
-    // Utilizamos los miembros ipFleck y portFleck como la IP y puerto del propio Enigma
+    frame.type = 0x02; // Tipo REGISTER
     snprintf(frame.data, sizeof(frame.data), "%s&%s&%d",
-             enigmaConfig->workerType, enigmaConfig->ipFleck, enigmaConfig->portFleck);
-
+            enigmaConfig->workerType, enigmaConfig->ipFleck, enigmaConfig->portFleck);
     frame.data_length = strlen(frame.data);
     frame.timestamp = (uint32_t)time(NULL);
     frame.checksum = calculate_checksum(frame.data, frame.data_length);
 
-    char buffer[FRAME_SIZE];
+    // Serializar frame y enviarlo
     serialize_frame(&frame, buffer);
     if (write(gothamSocket, buffer, FRAME_SIZE) < 0) {
-        printColor(ANSI_COLOR_RED, "[ERROR]: Error enviant el registre a Gotham.");
+        perror("[ERROR]: Error enviant el registre a Gotham.");
         close(gothamSocket);
-        free(enigmaConfig);
         return 1;
     }
 

@@ -21,6 +21,8 @@
 #include <netinet/in.h> // Estructura sockaddr_in
 #include <pthread.h>    // Per treballar amb fils
 #include <ctype.h>
+#include <signal.h>
+
 #include "FileReader/FileReader.h"
 #include "StringUtils/StringUtils.h"
 #include "DataConversion/DataConversion.h"
@@ -36,10 +38,12 @@ typedef struct {
 
 // Administra una llista dinàmica de workers registrats
 typedef struct {
-    WorkerInfo *workers;        // Llista dinàmica de workers
-    int workerCount;            // Nombre de workers registrats
-    int capacity;               // Capacitat actual de la llista
-    pthread_mutex_t mutex;      // Mutex per sincronitzar l'accés als workers
+    WorkerInfo *workers;        // Lista dinámica de workers registrados
+    int workerCount;            // Número de workers registrados
+    int capacity;               // Capacidad actual de la lista
+    WorkerInfo *mainTextWorker; // Worker principal para TEXT
+    WorkerInfo *mainMediaWorker; // Worker principal para MEDIA
+    pthread_mutex_t mutex;      // Mutex para sincronizar el acceso
 } WorkerManager;
 
 void mostrarCaratula() {
@@ -84,65 +88,41 @@ void *gestionarConexion(void *arg);
 void *esperarConexiones(void *arg);
 void processCommandInGotham(const char *command, int client_fd, WorkerManager *manager);
 void registrarWorker(const char *payload, WorkerManager *manager, int client_fd);
-int buscarWorker(const char *type, WorkerManager *manager, char *ip, int *port);
+
 int logoutWorkerBySocket(int socket_fd, WorkerManager *manager);
 void alliberarMemoria(GothamConfig *gothamConfig);
+WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager);
 
 void processRegisterWorker(const char *payload, WorkerManager *manager, int client_fd) {
-    char type[10] = {0};  // Variable per emmagatzemar el tipus de worker (Media o Text)
-    char ip[16] = {0};    // Variable per emmagatzemar la IP del worker
-    int port = 0;         // Variable per emmagatzemar el port del worker
-
-    // Copiem el payload per processar-lo sense modificar l'original
-    char *payloadCopy = strdup(payload);
-    if (!payloadCopy) {
-        logError("Error duplicant el payload.");
-        send_frame(client_fd, "CON_KO", strlen("CON_KO"));
-        return;
-    }
-
-    // Dividim el payload en parts utilitzant '&'
-    char *token = strtok(payloadCopy, "&");
-    if (token) strncpy(type, token, sizeof(type) - 1);
-
-    token = strtok(NULL, "&");
-    if (token) strncpy(ip, token, sizeof(ip) - 1);
-
-    token = strtok(NULL, "&");
-    if (token) port = atoi(token); // Convertim el port a un número enter
-
-    free(payloadCopy);
-
-    // Debug: Afegim logs per comprovar les variables
-    printf("[DEBUG]: Tipus de worker: %s, IP: %s, Port: %d\n", type, ip, port);
+    char type[10], ip[16];
+    int port;
+    sscanf(payload, "%[^&]&%[^&]&%d", type, ip, &port);
 
     pthread_mutex_lock(&manager->mutex);
 
-    // Ampliem la capacitat si cal
-    if (manager->workerCount == manager->capacity) {
-        manager->capacity *= 2;
-        WorkerInfo *newWorkers = realloc(manager->workers, manager->capacity * sizeof(WorkerInfo));
-        if (!newWorkers) {
-            logError("Error ampliant la capacitat dels workers.");
-            pthread_mutex_unlock(&manager->mutex);
-            send_frame(client_fd, "CON_KO", strlen("CON_KO"));
-            return;
+    if (strcasecmp(type, "TEXT") == 0) {
+        if (manager->mainTextWorker == NULL) {
+            manager->mainTextWorker = malloc(sizeof(WorkerInfo));
+            strncpy(manager->mainTextWorker->type, type, sizeof(manager->mainTextWorker->type) - 1);
+            strncpy(manager->mainTextWorker->ip, ip, sizeof(manager->mainTextWorker->ip) - 1);
+            manager->mainTextWorker->port = port;
+            manager->mainTextWorker->socket_fd = client_fd;
+            logSuccess("Worker principal asignado para TEXT.");
         }
-        manager->workers = newWorkers;
+    } else if (strcasecmp(type, "MEDIA") == 0) {
+        if (manager->mainMediaWorker == NULL) {
+            manager->mainMediaWorker = malloc(sizeof(WorkerInfo));
+            strncpy(manager->mainMediaWorker->type, type, sizeof(manager->mainMediaWorker->type) - 1);
+            strncpy(manager->mainMediaWorker->ip, ip, sizeof(manager->mainMediaWorker->ip) - 1);
+            manager->mainMediaWorker->port = port;
+            manager->mainMediaWorker->socket_fd = client_fd;
+            logSuccess("Worker principal asignado para MEDIA.");
+        }
+    } else {
+        logError("Tipo de worker desconocido. No se puede asignar.");
     }
 
-    // Afegim el nou worker a la llista
-    WorkerInfo *worker = &manager->workers[manager->workerCount++];
-    strncpy(worker->type, type, sizeof(worker->type) - 1);
-    strncpy(worker->ip, ip, sizeof(worker->ip) - 1);
-    worker->port = port;
-
     pthread_mutex_unlock(&manager->mutex);
-
-    // Responem al client amb èxit
-    send_frame(client_fd, "CON_OK", strlen("CON_OK"));
-    logSuccess("Worker registrat correctament a Gotham.");
-    close(client_fd);
 }
 
 
@@ -303,7 +283,7 @@ int deserialize_frame(const char *buffer, Frame *frame) {
     if (token) frame->type = (uint8_t)strtoul(token, NULL, 16);
 
     token = strtok(NULL, "|");
-    if (token) frame->data_length = (uint16_t)strtol(token, NULL, 10);
+    if (token) frame->data_length = (uint16_t)strtoul(token, NULL, 16);
 
     token = strtok(NULL, "|");
     if (token) frame->timestamp = (uint32_t)strtoul(token, NULL, 10);
@@ -314,12 +294,7 @@ int deserialize_frame(const char *buffer, Frame *frame) {
     token = strtok(NULL, "|");
     if (token) {
         strncpy(frame->data, token, frame->data_length);
-        frame->data[frame->data_length] = '\0'; // Assegura terminació nula
-    }
-
-    uint16_t calculated_checksum = calculate_checksum(frame->data, frame->data_length);
-    if (calculated_checksum != frame->checksum) {
-        return -1;
+        frame->data[frame->data_length] = '\0'; // Terminación nula
     }
 
     return 0;
@@ -337,18 +312,17 @@ int deserialize_frame(const char *buffer, Frame *frame) {
 ************************************************/
 void processCommandInGotham(const char *frame_buffer, int client_fd, WorkerManager *manager) {
     Frame frame;
-    deserialize_frame(frame_buffer, &frame);
+    if (deserialize_frame(frame_buffer, &frame) != 0) {
+        logError("Error deserialitzant el frame rebut.");
+        return;
+    }
 
     // Validar checksum solo sobre los datos del frame
     uint16_t calculated_checksum = calculate_checksum(frame.data, frame.data_length);
+
+    
     if (calculated_checksum != frame.checksum) {
         logError("Trama amb checksum invàlid.");
-        Frame response = {.type = 0xFF, .data_length = 0, .timestamp = time(NULL)};
-        response.checksum = calculate_checksum(response.data, response.data_length);
-
-        char buffer[FRAME_SIZE];
-        serialize_frame(&response, buffer);
-        write(client_fd, buffer, FRAME_SIZE);
         return;
     }
 
@@ -385,55 +359,44 @@ void processCommandInGotham(const char *frame_buffer, int client_fd, WorkerManag
             break;
 
         case 0x10: // DISTORT
-            logInfo("[DEBUG]: Processant DISTORT...");
+            logInfo("Processing DISTORT request...");
 
-            char workerIP[16];
-            int workerPort;
-            pthread_mutex_lock(&manager->mutex);
-            int workerFound = buscarWorker("MEDIA", manager, workerIP, &workerPort);
-            pthread_mutex_unlock(&manager->mutex);
+            // Buscar el worker basado en el archivo
+            WorkerInfo *targetWorker = buscarWorker(frame.data, manager);
+            if (targetWorker == NULL) {
+                logError("No hay workers disponibles para este tipo de archivo.");
+                send_frame(client_fd, "DISTORT_KO", strlen("DISTORT_KO"));
+                return;
+            }
 
-            if (workerFound == 0) {
-                logInfo("[INFO]: Worker trobat. Redirigint comanda...");
+            // Conectar al worker y redirigir la solicitud
+            int workerSocket = connect_to_server(targetWorker->ip, targetWorker->port);
+            if (workerSocket < 0) {
+                logError("No se pudo conectar al worker.");
+                send_frame(client_fd, "DISTORT_KO", strlen("DISTORT_KO"));
+                return;
+            }
 
-                int workerSocket = connect_to_server(workerIP, workerPort);
-                if (workerSocket >= 0) {
-                    write(workerSocket, frame_buffer, FRAME_SIZE);
+            write(workerSocket, frame_buffer, FRAME_SIZE);
 
-                    char workerResponse[FRAME_SIZE];
-                    if (read(workerSocket, workerResponse, FRAME_SIZE) > 0) {
-                        logInfo("[DEBUG]: Resposta del worker:");
-                        logInfo(workerResponse);
-
-                        // Validar i reenviar la resposta al client
-                        Frame response;
-                        deserialize_frame(workerResponse, &response); // Deserialitzar resposta del worker
-
-                        // Recalcular el checksum abans de reenviar
-                        response.checksum = calculate_checksum(response.data, response.data_length);
-
-                        // Serialitzar la resposta per enviar-la a Fleck/Harley
-                        serialize_frame(&response, workerResponse);
-                        write(client_fd, workerResponse, FRAME_SIZE);
-                        close(workerSocket);
-                    }
-                    else {
-                        logError("[ERROR]: Worker no ha respost.");
-                        send_frame(client_fd, "DISTORT_KO", strlen("DISTORT_KO"));
-                    }
-                } else {
-                    logError("[ERROR]: No s'ha pogut connectar al worker.");
-                    send_frame(client_fd, "DISTORT_KO", strlen("DISTORT_KO"));
-                }
+            // Leer la respuesta del worker
+            char workerResponse[FRAME_SIZE];
+            if (read(workerSocket, workerResponse, FRAME_SIZE) > 0) {
+                write(client_fd, workerResponse, FRAME_SIZE);
             } else {
-                logError("[ERROR]: Cap worker disponible.");
+                logError("No se recibió respuesta del worker.");
                 send_frame(client_fd, "DISTORT_KO", strlen("DISTORT_KO"));
             }
+
+            close(workerSocket);
             break;
 
         case 0x20: // CHECK STATUS
-            logSuccess("Processant CHECK STATUS...");
-            Frame status_frame = {.type = 0x20, .data_length = 0, .timestamp = time(NULL)};
+            logInfo("Processing CHECK STATUS...");
+            // Aquí enviarás una respuesta adecuada.
+            Frame status_frame = {.type = 0x20, .timestamp = time(NULL)};
+            strncpy(status_frame.data, "STATUS_OK", sizeof(status_frame.data) - 1);
+            status_frame.data_length = strlen(status_frame.data);
             status_frame.checksum = calculate_checksum(status_frame.data, status_frame.data_length);
 
             char status_buffer[FRAME_SIZE];
@@ -475,63 +438,30 @@ void registrarWorker(const char *payload, WorkerManager *manager, int client_fd)
     char type[10] = {0}, ip[16] = {0};
     int port = 0;
 
-    // Hacemos una copia del payload para no modificar la original
-    char *payloadCopy = strdup(payload);
-    if (!payloadCopy) {
-        logError("Error duplicando el payload.");
-        return;
-    }
-
-    // Utilizamos strtok para dividir el payload por '&'
-    char *token = strtok(payloadCopy, "&");
-    if (token) {
-        strncpy(type, token, sizeof(type) - 1);
-    } else {
-        logError("Error al parsear el tipo de worker.");
-        free(payloadCopy);
-        return;
-    }
-
-    token = strtok(NULL, "&");
-    if (token) {
-        strncpy(ip, token, sizeof(ip) - 1);
-    } else {
-        logError("Error al parsear la IP del worker.");
-        free(payloadCopy);
-        return;
-    }
-
-    token = strtok(NULL, "&");
-    if (token) {
-        port = atoi(token);
-    } else {
-        logError("Error al parsear el puerto del worker.");
-        free(payloadCopy);
-        return;
-    }
-
-    free(payloadCopy);
+    // Parsear el payload
+    sscanf(payload, "%[^&]&%[^&]&%d", type, ip, &port);
 
     pthread_mutex_lock(&manager->mutex);
 
-    // Comprobar si es necesario ampliar la capacidad
+    // Ampliar la capacidad si es necesario
     if (manager->workerCount == manager->capacity) {
         manager->capacity *= 2;
-        WorkerInfo *newWorkers = realloc(manager->workers, manager->capacity * sizeof(WorkerInfo));
-        if (!newWorkers) {
-            logError("Error ampliando la lista de workers.");
-            pthread_mutex_unlock(&manager->mutex);
-            return;
-        }
-        manager->workers = newWorkers;
+        manager->workers = realloc(manager->workers, manager->capacity * sizeof(WorkerInfo));
     }
 
-    // Añadir el nuevo worker
+    // Registrar el nuevo worker
     WorkerInfo *worker = &manager->workers[manager->workerCount++];
     strncpy(worker->type, type, sizeof(worker->type) - 1);
     strncpy(worker->ip, ip, sizeof(worker->ip) - 1);
     worker->port = port;
     worker->socket_fd = client_fd;
+
+    // Asignar como principal si es el primer worker de su tipo
+    if (strcasecmp(type, "TEXT") == 0 && manager->mainTextWorker == NULL) {
+        manager->mainTextWorker = worker;
+    } else if (strcasecmp(type, "MEDIA") == 0 && manager->mainMediaWorker == NULL) {
+        manager->mainMediaWorker = worker;
+    }
 
     pthread_mutex_unlock(&manager->mutex);
 
@@ -547,22 +477,41 @@ void registrarWorker(const char *payload, WorkerManager *manager, int client_fd)
 *   out: port = port del worker trobat.
 * @Retorn: 0 si trobat, -1 si no trobat.
 ************************************************/
-int buscarWorker(const char *type, WorkerManager *manager, char *ip, int *port) {
-    for (int i = 0; i < manager->workerCount; i++) {
-        if (strcasecmp(manager->workers[i].type, type) == 0) {
-            strncpy(ip, manager->workers[i].ip, 16);
-            *port = manager->workers[i].port;
-            printF("[INFO]: Worker trobat: ");
-            printF(ip);
-            printF(":");
-            char portDebug[10];
-            snprintf(portDebug, 10, "%d\n", *port);
-            printF(portDebug);
-            return 0;
-        }
+WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager) {
+    if (!filename || !manager) {
+        logError("Nombre de archivo o manager inválido.");
+        return NULL;
     }
-    printF("[DEBUG]: No hi ha workers disponibles del tipus sol·licitat.\n");
-    return -1;
+
+    // Extraer la extensión del archivo
+    char *extension = strrchr(filename, '.');
+    if (!extension) {
+        logError("No se pudo determinar la extensión del archivo.");
+        return NULL;
+    }
+
+    pthread_mutex_lock(&manager->mutex);
+
+    WorkerInfo *targetWorker = NULL;
+
+    // Determinar el worker principal basado en la extensión
+    if (strcasecmp(extension, ".txt") == 0) {
+        targetWorker = manager->mainTextWorker;
+        logInfo("Asignando worker principal para archivos de texto.");
+    } else if (strcasecmp(extension, ".wav") == 0 || strcasecmp(extension, ".png") == 0) {
+        targetWorker = manager->mainMediaWorker;
+        logInfo("Asignando worker principal para archivos multimedia.");
+    } else {
+        logError("Extensión no reconocida.");
+    }
+
+    pthread_mutex_unlock(&manager->mutex);
+
+    if (!targetWorker) {
+        logError("No hay workers disponibles para el tipo de archivo.");
+    }
+
+    return targetWorker;
 }
 
 /***********************************************
@@ -593,6 +542,47 @@ void alliberarMemoria(GothamConfig *gothamConfig) {
     free(gothamConfig);
 }
 
+WorkerManager *workerManager = NULL;
+
+void handleSigint(int sig) {
+    (void)sig;
+    // Log de cierre del sistema
+    logInfo("S'ha rebut SIGINT. Tancant el sistema...");
+
+    // Notificar a Fleck
+    logInfo("Notificant a Fleck...");
+    // Enviar un frame de tipo especial para indicar cierre
+    Frame closeFrame;
+    memset(&closeFrame, 0, sizeof(Frame));
+    closeFrame.type = 0xFF; // Tipo de frame para notificar cierre
+    closeFrame.data_length = 0; // No necesita datos adicionales
+    closeFrame.timestamp = (uint32_t)time(NULL);
+    closeFrame.checksum = calculate_checksum(closeFrame.data, closeFrame.data_length);
+
+    char buffer[FRAME_SIZE];
+    serialize_frame(&closeFrame, buffer);
+    
+    // Iterar sobre los workers registrados y enviarles la notificación de cierre
+    pthread_mutex_lock(&workerManager->mutex);
+    for (int i = 0; i < workerManager->workerCount; i++) {
+        WorkerInfo *worker = &workerManager->workers[i];
+        write(worker->socket_fd, buffer, FRAME_SIZE);
+        logInfo("Notificat a un worker.");
+    }
+    pthread_mutex_unlock(&workerManager->mutex);
+
+    // Cerrar conexiones con Fleck y los sockets abiertos
+    logInfo("Tancant els sockets dels workers i el servidor principal.");
+    for (int i = 0; i < workerManager->workerCount; i++) {
+        close(workerManager->workers[i].socket_fd);
+    }
+    freeWorkerManager(workerManager);
+
+    // Salir del programa
+    logSuccess("Sistema tancat correctament.");
+    exit(0);
+}
+
 /***********************************************
 * @Finalitat: Funció principal del programa Gotham.
 ************************************************/
@@ -603,6 +593,9 @@ int main(int argc, char *argv[]) {
     }
 
     mostrarCaratula();
+
+    // Configurar el manejador de señales
+    signal(SIGINT, handleSigint);
 
     // Carrega la configuració
     GothamConfig *config = malloc(sizeof(GothamConfig));
