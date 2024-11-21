@@ -11,11 +11,12 @@
 #include "FileReader/FileReader.h"
 #include "StringUtils/StringUtils.h"
 #include "Networking/Networking.h"
+#include "FrameUtils/FrameUtils.h"
 
 // Variable global para el socket
 int gothamSocket = -1;
 
-// Funciones auxiliares
+// Función para manejar señales como SIGINT
 void signalHandler(int sig) {
     if (sig == SIGINT) {
         printF(ANSI_COLOR_YELLOW "[INFO]: Desconnectant de Gotham...\n" ANSI_COLOR_RESET);
@@ -26,97 +27,34 @@ void signalHandler(int sig) {
     }
 }
 
+// Función para imprimir mensajes con color
 void printColor(const char *color, const char *message) {
     printF(color);
     printF(message);
     printF(ANSI_COLOR_RESET "\n");
 }
 
-// Serialización y deserialización consistentes
-// Serialización con depuración para asegurar datos completos
-void serialize_frame(const Frame *frame, char *buffer) {
-    memset(buffer, 0, FRAME_SIZE);
-    snprintf(buffer, FRAME_SIZE, "%02x|%04d|%u|%04x|%s",
-             frame->type, frame->data_length, frame->timestamp,
-             frame->checksum, frame->data);
-}
+// Procesa un frame recibido de Gotham
+void processReceivedFrame(int gothamSocket, const Frame *frame) {
+    if (!frame) return;
 
-int deserialize_frame(const char *buffer, Frame *frame) {
-    if (buffer == NULL || frame == NULL) {
-        return -1;
-    }
-
-    char localBuffer[FRAME_SIZE];
-    strncpy(localBuffer, buffer, FRAME_SIZE - 1);
-    localBuffer[FRAME_SIZE - 1] = '\0'; // Asegurar terminación nula
-
-    char *token = strtok(localBuffer, "|");
-    if (!token) return -1;
-    frame->type = (uint8_t)strtoul(token, NULL, 16);
-
-    token = strtok(NULL, "|");
-    if (!token) return -1;
-    frame->data_length = (uint16_t)strtoul(token, NULL, 10);
-
-    token = strtok(NULL, "|");
-    if (!token) return -1;
-    frame->timestamp = (uint32_t)strtoul(token, NULL, 10);
-
-    token = strtok(NULL, "|");
-    if (!token) return -1;
-    frame->checksum = (uint16_t)strtoul(token, NULL, 16);
-
-    token = strtok(NULL, "|");
-    if (!token) return -1;
-    strncpy(frame->data, token, frame->data_length);
-    frame->data[frame->data_length] = '\0'; // Terminación nula
-
-    return 0; // Frame válido
-}
-
-// Implementación de processReceivedFrame
-void processReceivedFrame(int gothamSocket, const char *buffer) {
-    Frame frame;
-    int result = deserialize_frame(buffer, &frame);
-    if (result != 0) {
-        printColor(ANSI_COLOR_RED, "[ERROR]: Error al deserialitzar el frame rebut.");
-        return;
-    }
-
-    // Validar el checksum
-    uint16_t calculated_checksum = calculate_checksum(frame.data, frame.data_length);
-    if (calculated_checksum != frame.checksum) {
-        printColor(ANSI_COLOR_RED, "[ERROR]: Trama rebuda amb checksum invàlid.");
-        return;
-    }
-
-    // Procesar según el tipo de frame
-    if (frame.type == 0x10) {
-        printColor(ANSI_COLOR_CYAN, "[INFO]: DISTORT rebuda. Processant...");
-
-        // Simula processament
-        sleep(2); // Simula el temps de processament
-
-        // Resposta DISTORT_OK
-        Frame response;
-        memset(&response, 0, sizeof(Frame));
-        response.type = 0x10;
+    if (frame->type == 0x10) { // DISTORT
+        printColor(ANSI_COLOR_CYAN, "[INFO]: Procesando comando DISTORT...");
+        Frame response = { .type = 0x10, .timestamp = time(NULL) };
         strncpy(response.data, "DISTORT_OK", sizeof(response.data) - 1);
         response.data_length = strlen(response.data);
-        response.timestamp = (uint32_t)time(NULL);
         response.checksum = calculate_checksum(response.data, response.data_length);
 
-        char responseBuffer[FRAME_SIZE];
-        serialize_frame(&response, responseBuffer);
+        send_frame(gothamSocket, &response);
+        printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Respuesta DISTORT_OK enviada.");
+    } else {
+        printColor(ANSI_COLOR_RED, "[ERROR]: Comando desconocido recibido.");
+        Frame response = { .type = 0xFF, .timestamp = time(NULL) };
+        strncpy(response.data, "CMD_KO", sizeof(response.data) - 1);
+        response.data_length = strlen(response.data);
+        response.checksum = calculate_checksum(response.data, response.data_length);
 
-        printColor(ANSI_COLOR_CYAN, "[DEBUG]: Resposta enviada a Gotham:");
-        printColor(ANSI_COLOR_YELLOW, responseBuffer);
-
-        write(gothamSocket, responseBuffer, FRAME_SIZE);
-        printColor(ANSI_COLOR_GREEN, "[SUCCESS]: DISTORT completat correctament.");
-    }
-    else {
-        printColor(ANSI_COLOR_RED, "[ERROR]: Tipus de comanda desconegut.");
+        send_frame(gothamSocket, &response);
     }
 }
 
@@ -128,90 +66,90 @@ int main(int argc, char *argv[]) {
 
     signal(SIGINT, signalHandler);
 
+    // Carga de configuración
     HarleyConfig *harleyConfig = malloc(sizeof(HarleyConfig));
     if (!harleyConfig) {
-        printColor(ANSI_COLOR_RED, "[ERROR]: Error assignant memòria per a la configuració.");
+        printColor(ANSI_COLOR_RED, "[ERROR]: Error asignando memoria para la configuración.");
         return 1;
     }
+
     readConfigFileGeneric(argv[1], harleyConfig, CONFIG_HARLEY);
 
     if (!harleyConfig->workerType || !harleyConfig->ipFleck || harleyConfig->portFleck <= 0) {
-        printColor(ANSI_COLOR_RED, "[ERROR]: Configuració de Harley incorrecta o incompleta.");
+        printColor(ANSI_COLOR_RED, "[ERROR]: Configuración de Harley incorrecta o incompleta.");
         free(harleyConfig);
         return 1;
     }
 
-    printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Configuració carregada correctament.");
+    printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Configuración cargada correctamente.");
 
+    // Conexión a Gotham
     gothamSocket = connect_to_server(harleyConfig->ipGotham, harleyConfig->portGotham);
     if (gothamSocket < 0) {
-        printColor(ANSI_COLOR_RED, "[ERROR]: No s'ha pogut connectar a Gotham.");
+        printColor(ANSI_COLOR_RED, "[ERROR]: No se pudo conectar a Gotham.");
         free(harleyConfig);
         return 1;
     }
-    printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Connectat correctament a Gotham!");
+    printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Conectado correctamente a Gotham!");
 
-    Frame frame;
-    char buffer[FRAME_SIZE];
-
-    frame.type = 0x02; // Tipo REGISTER
+    // Registro en Gotham
+    Frame frame = { .type = 0x02, .timestamp = time(NULL) };
     snprintf(frame.data, sizeof(frame.data), "%s&%s&%d",
              harleyConfig->workerType, harleyConfig->ipFleck, harleyConfig->portFleck);
     frame.data_length = strlen(frame.data);
-    frame.timestamp = (uint32_t)time(NULL);
     frame.checksum = calculate_checksum(frame.data, frame.data_length);
 
-    serialize_frame(&frame, buffer);
-
-    if (write(gothamSocket, buffer, FRAME_SIZE) < 0) {
-        printColor(ANSI_COLOR_RED, "[ERROR]: Error enviant el registre a Gotham.");
+    if (send_frame(gothamSocket, &frame) < 0) {
+        printColor(ANSI_COLOR_RED, "[ERROR]: Error enviando el registro a Gotham.");
         close(gothamSocket);
         free(harleyConfig);
         return 1;
     }
 
-    if (read(gothamSocket, buffer, FRAME_SIZE) <= 0) {
-        printColor(ANSI_COLOR_RED, "[ERROR]: No s'ha rebut resposta de Gotham.");
+    if (receive_frame(gothamSocket, &frame) != 0) {
+        printColor(ANSI_COLOR_RED, "[ERROR]: No se recibió respuesta de Gotham.");
         close(gothamSocket);
         free(harleyConfig);
         return 1;
     }
 
-    Frame response;
-    if (deserialize_frame(buffer, &response) != 0) {
-        printColor(ANSI_COLOR_RED, "[ERROR]: Error al deserialitzar la resposta de Gotham.");
+    if (frame.type == 0x02 && strcmp(frame.data, "CON_OK") == 0) {
+        printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Worker registrado correctamente en Gotham.");
+        
+        // Extraemos los datos del worker para mostrarlos (workerType, ipFleck, portFleck)
+        char *log_message = NULL;
+        asprintf(&log_message, "[INFO]: Tipo de worker: %s\n"
+                            "[INFO]: IP registrada: %s\n"
+                            "[INFO]: Puerto registrado: %d\n",
+                harleyConfig->workerType, harleyConfig->ipFleck, harleyConfig->portFleck);
+        printF(log_message);
+        free(log_message);
+
+    } else if (frame.type == 0xFF) {
+        printColor(ANSI_COLOR_YELLOW, "[INFO]: Gotham notifica el cierre del sistema.");
         close(gothamSocket);
         free(harleyConfig);
-        return 1;
-    }
-
-    uint16_t resp_checksum = calculate_checksum(response.data, response.data_length);
-    if (resp_checksum != response.checksum) {
-        printColor(ANSI_COLOR_RED, "[ERROR]: Resposta de Gotham amb checksum invàlid.");
-        close(gothamSocket);
-        free(harleyConfig);
-        return 1;
-    }
-
-    if (response.type == 0x02 && strcmp(response.data, "CON_OK") == 0) {
-        printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Worker registrat correctament a Gotham.");
+        return 0;
     } else {
-        printColor(ANSI_COLOR_RED, "[ERROR]: El registre ha estat rebutjat per Gotham.");
+        printColor(ANSI_COLOR_RED, "[ERROR]: El registro fue rechazado por Gotham.");
         close(gothamSocket);
         free(harleyConfig);
         return 1;
     }
 
+    // Bucle principal para recibir frames
     while (1) {
-        if (read(gothamSocket, buffer, FRAME_SIZE) <= 0) {
-            printColor(ANSI_COLOR_RED, "[ERROR]: Error rebent la petició de Gotham.");
+        Frame frame;
+        if (receive_frame(gothamSocket, &frame) == 0) {
+            processReceivedFrame(gothamSocket, &frame);
+        } else {
+            printColor(ANSI_COLOR_RED, "[ERROR]: Error recibiendo frame de Gotham.");
             break;
         }
-        processReceivedFrame(gothamSocket, buffer);
     }
 
+    // Limpieza y cierre
     close(gothamSocket);
     free(harleyConfig);
     return 0;
 }
-

@@ -1,22 +1,21 @@
-#include <stdio.h>
-#include <stdlib.h>
+#define _GNU_SOURCE // Necesario para funciones GNU como asprintf
+
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <time.h>
-
+#include <stdlib.h>
 #include "Networking.h"
-#include "StringUtils.h" // trim()
 
+// Conecta a un servidor
 int connect_to_server(const char *ip, int port) {
-    if (ip == NULL) {
+    if (!ip) {
         printF("Error: IP NULL\n");
         return -1;
     }
 
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
-        perror("Error creando el socket");
+        printF("Error creando el socket\n");
         return -1;
     }
 
@@ -25,29 +24,31 @@ int connect_to_server(const char *ip, int port) {
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
 
-    printF("Conectando a la IP: ");
-    printF(ip);
-    printF("\n");
-
     if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0) {
-        perror("IP no válida");
+        printF("IP no válida\n");
         close(sockfd);
         return -1;
     }
 
     if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        perror("Error conectando al servidor");
+        printF("Error conectando al servidor\n");
         close(sockfd);
         return -1;
     }
 
+    char *msg = NULL;
+    asprintf(&msg, "Conectado al servidor: %s:%d\n", ip, port);
+    printF(msg);
+    free(msg);
+
     return sockfd;
 }
 
+// Inicia un servidor
 int startServer(const char *ip, int port) {
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
-        perror("Error creando el socket del servidor");
+        printF("Error creando el socket del servidor\n");
         return -1;
     }
 
@@ -57,105 +58,49 @@ int startServer(const char *ip, int port) {
     server_addr.sin_port = htons(port);
 
     if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0) {
-        perror("IP no válida");
+        printF("IP no válida\n");
         close(server_fd);
         return -1;
     }
 
     if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        perror("Error en el bind");
+        printF("Error en el bind\n");
         close(server_fd);
         return -1;
     }
 
     if (listen(server_fd, 5) < 0) {
-        perror("Error en el listen");
+        printF("Error en el listen\n");
         close(server_fd);
         return -1;
     }
 
-    printF("Servidor escuchando en ");
-    printF(ip);
-    printF("\n");
+    char *msg = NULL;
+    asprintf(&msg, "Servidor escuchando en %s:%d\n", ip, port);
+    printF(msg);
+    free(msg);
 
     return server_fd;
 }
 
+// Acepta una conexión
 int accept_connection(int server_fd) {
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
 
     int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
     if (client_fd < 0) {
-        perror("Error al aceptar la conexión");
+        printF("Error al aceptar la conexión\n");
         return -1;
     }
 
-    // Obtener IP y puerto del cliente conectado
-    const char *client_ip = inet_ntoa(client_addr.sin_addr);
+    char *client_ip = inet_ntoa(client_addr.sin_addr);
     int client_port = ntohs(client_addr.sin_port);
 
-    // Crear el mensaje para la macro printF
-    char logMessage[256];
-    snprintf(logMessage, sizeof(logMessage), "Nueva conexión aceptada desde IP: %s, Puerto: %d\n", client_ip, client_port);
-    printF(logMessage);
+    char *msg = NULL;
+    asprintf(&msg, "Nueva conexión aceptada desde IP: %s, Puerto: %d\n", client_ip, client_port);
+    printF(msg);
+    free(msg);
 
     return client_fd;
-}
-
-int send_frame(int socket_fd, const char *data, int data_length) {
-    char frame[FRAME_SIZE] = {0};
-    char checksum[CHECKSUM_SIZE];
-    char timestamp[TIMESTAMP_SIZE];
-
-    uint16_t checksum_value = calculate_checksum(data, data_length);
-    snprintf(checksum, CHECKSUM_SIZE, "%04x", checksum_value);
-    get_timestamp(timestamp);
-
-    snprintf(frame, FRAME_SIZE, "%d|%s|%s|%s", data_length, data, checksum, timestamp);
-
-    if (write(socket_fd, frame, FRAME_SIZE) < 0) {
-        perror("Error enviando el frame");
-        return -1;
-    }
-
-    return 0;
-}
-
-uint16_t calculate_checksum(const char *data, size_t length) {
-    uint32_t sum = 0;
-    for (size_t i = 0; i < length; i++) {
-        sum += (uint8_t)data[i];
-    }
-    return (uint16_t)(sum % CHECKSUM_MODULO);
-}
-
-int receive_frame(int socket_fd, char *data, int *data_length) {
-    char frame[FRAME_SIZE] = {0};
-    char received_checksum[CHECKSUM_SIZE];
-    char timestamp[TIMESTAMP_SIZE];
-
-    if (read(socket_fd, frame, FRAME_SIZE) <= 0) {
-        printF("Error recibiendo el frame\n");
-        return -1;
-    }
-
-    sscanf(frame, "%d|%[^|]|%[^|]|%s", data_length, data, received_checksum, timestamp);
-
-    uint16_t calculated_checksum = calculate_checksum(data, *data_length);
-    char calculated_checksum_str[CHECKSUM_SIZE];
-    snprintf(calculated_checksum_str, CHECKSUM_SIZE, "%04x", calculated_checksum);
-
-    if (strcmp(calculated_checksum_str, received_checksum) != 0) {
-        printF("Error: checksum inválido\n");
-        return -1;
-    }
-
-    return 0;
-}
-
-void get_timestamp(char *timestamp) {
-    time_t now = time(NULL);
-    struct tm *t = localtime(&now);
-    strftime(timestamp, TIMESTAMP_SIZE, "%Y-%m-%d %H:%M:%S", t);
 }

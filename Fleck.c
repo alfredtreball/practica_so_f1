@@ -14,6 +14,7 @@
 #include "StringUtils/StringUtils.h"
 #include "DataConversion/DataConversion.h"
 #include "Networking/Networking.h"
+#include "FrameUtils/FrameUtils.h"
 
 #define FRAME_SIZE 256
 #define CHECKSUM_MODULO 65536
@@ -35,55 +36,31 @@ void printColor(const char *color, const char *message) {
 
 // Función para listar los archivos de texto (.txt) en el directorio especificado
 void listText(const char *directory) {
-    if (!directory) {
-        printF("[ERROR]: Directory is NULL.\n");
-        return;
-    }
-
     pid_t pid = fork();
 
-    if (pid == 0) { // Proceso hijo
-        // Abrir un archivo temporal para guardar los resultados
+    if (pid == 0) { // Procés fill
         int tempFd = open("text_files.txt", O_WRONLY | O_CREAT | O_TRUNC, 0777);
         if (tempFd == -1) {
-            perror("[ERROR]: Unable to open temporary file");
-            exit(EXIT_FAILURE);
+            printF("Error obrint el fitxer temporal\n");
+            exit(1);
         }
-
-        // Redirigir la salida estándar al archivo temporal
-        dup2(tempFd, STDOUT_FILENO);
+        dup2(tempFd, STDOUT_FILENO); // Redirigeix la sortida estàndard al fitxer temporal
         close(tempFd);
 
-        // Comando para encontrar archivos de texto
-        char *args[] = {
-            "/usr/bin/find", (char *)directory, "-type", "f", "-name", "*.txt", "-exec", "basename", "{}", ";", NULL
-        };
+        char *args[] = {"/usr/bin/find", (char *)directory, "-type", "f", "-name", "*.txt", "-exec", "basename", "{}", ";", NULL};
         execv(args[0], args);
 
-        // Si execv falla
-        perror("[ERROR]: execv failed");
-        exit(EXIT_FAILURE);
-    } else if (pid > 0) { // Proceso padre
-        // Esperar a que el proceso hijo termine
-        int status;
-        if (waitpid(pid, &status, 0) == -1) {
-            perror("[ERROR]: waitpid failed");
-            return;
-        }
+        printF("Error executant find\n"); // Si execv falla
+        exit(1);
+    } else if (pid > 0) { // Procés pare
+        wait(NULL);
 
-        if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-            printF("[ERROR]: Child process exited with error.\n");
-            return;
-        }
-
-        // Leer el archivo temporal
         int tempFd = open("text_files.txt", O_RDONLY);
         if (tempFd == -1) {
-            perror("[ERROR]: Unable to open temporary file for reading");
+            printF("Error obrint el fitxer temporal\n");
             return;
         }
 
-        // Contar y mostrar los resultados
         int count = 0;
         char *line;
         while ((line = readUntil(tempFd, '\n')) != NULL) {
@@ -91,7 +68,7 @@ void listText(const char *directory) {
             free(line);
         }
 
-        char *countStr = intToStr(count);
+        char *countStr = intToStr(count); 
         printF("There are ");
         printF(countStr);
         printF(" text files available:\n");
@@ -112,63 +89,41 @@ void listText(const char *directory) {
 
         close(tempFd);
     } else {
-        perror("[ERROR]: fork failed");
+        printF("Error en fork\n");
     }
 }
 
-// Función para listar archivos multimedia
+// Función para listar los archivos de tipo media (wav, jpg, png) en el directorio especificado
 void listMedia(const char *directory) {
-    if (!directory) {
-        printF("[ERROR]: Directory is NULL.\n");
-        return;
-    }
+   pid_t pid = fork();
 
-    pid_t pid = fork();
-
-    if (pid == 0) { // Proceso hijo
-        // Abrir un archivo temporal para guardar los resultados
+    if (pid == 0) { // Procés fill
         int tempFd = open("media_files.txt", O_WRONLY | O_CREAT | O_TRUNC, 0777);
         if (tempFd == -1) {
-            perror("[ERROR]: Unable to open temporary file");
-            exit(EXIT_FAILURE);
+            printF("Error obrint el fitxer temporal\n");
+            exit(1);
         }
-
-        // Redirigir la salida estándar al archivo temporal
-        dup2(tempFd, STDOUT_FILENO);
+        dup2(tempFd, STDOUT_FILENO); 
         close(tempFd);
 
-        // Comando para encontrar archivos multimedia
         char *args[] = {
-            "/usr/bin/find", (char *)directory, "-type", "f",
-            "\\(", "-name", "*.wav", "-o", "-name", "*.jpg", "-o", "-name", "*.png", "\\)",
-            "-exec", "basename", "{}", ";", NULL
+            "/bin/bash", "-c",
+            "find \"$1\" -type f \\( -name '*.wav' -o -name '*.jpg' -o -name '*.png' \\) -exec basename {} \\;",
+            "bash", (char *)directory, NULL
         };
         execv(args[0], args);
 
-        // Si execv falla
-        perror("[ERROR]: execv failed");
-        exit(EXIT_FAILURE);
-    } else if (pid > 0) { // Proceso padre
-        // Esperar a que el proceso hijo termine
-        int status;
-        if (waitpid(pid, &status, 0) == -1) {
-            perror("[ERROR]: waitpid failed");
-            return;
-        }
+        printF("Error executant find\n");
+        exit(1);
+    } else if (pid > 0) { 
+        wait(NULL);
 
-        if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-            printF("[ERROR]: Child process exited with error.\n");
-            return;
-        }
-
-        // Leer el archivo temporal
         int tempFd = open("media_files.txt", O_RDONLY);
         if (tempFd == -1) {
-            perror("[ERROR]: Unable to open temporary file for reading");
+            printF("Error obrint el fitxer temporal\n");
             return;
         }
 
-        // Contar y mostrar los resultados
         int count = 0;
         char *line;
         while ((line = readUntil(tempFd, '\n')) != NULL) {
@@ -176,7 +131,7 @@ void listMedia(const char *directory) {
             free(line);
         }
 
-        char *countStr = intToStr(count);
+        char *countStr = intToStr(count); 
         printF("There are ");
         printF(countStr);
         printF(" media files available:\n");
@@ -197,85 +152,8 @@ void listMedia(const char *directory) {
 
         close(tempFd);
     } else {
-        perror("[ERROR]: fork failed");
+        printF("Error en fork\n");
     }
-}
-
-void serialize_frame(const Frame *frame, char *buffer) {
-    memset(buffer, 0, FRAME_SIZE);
-    snprintf(buffer, FRAME_SIZE, "%02x|%04x|%u|%04x|%s",
-             frame->type, frame->data_length, frame->timestamp, frame->checksum, frame->data);
-}
-
-int deserialize_frame(const char *buffer, Frame *frame) {
-    if (buffer == NULL || frame == NULL) {
-        // Error: Invalid input parameters
-        return -1;
-    }
-
-    memset(frame, 0, sizeof(Frame));
-
-    char localBuffer[FRAME_SIZE];
-    strncpy(localBuffer, buffer, FRAME_SIZE - 1);
-    localBuffer[FRAME_SIZE - 1] = '\0'; // Ensure null termination
-
-    char *token = NULL;
-
-    // FIELD: TYPE
-    token = strtok(localBuffer, "|");
-    if (token != NULL && strlen(token) > 0) {
-        frame->type = (uint8_t)strtoul(token, NULL, 16);
-    } else {
-        // Error: Missing or invalid TYPE field
-        return -1;
-    }
-
-    // FIELD: DATA_LENGTH
-    token = strtok(NULL, "|");
-    if (token != NULL) {
-        unsigned int data_length = strtoul(token, NULL, 16);
-        if (data_length > sizeof(frame->data)) {
-            // Error: DATA_LENGTH out of range
-            return -1;
-        }
-        frame->data_length = (uint16_t)data_length;
-    } else {
-        // Error: Missing DATA_LENGTH field
-        return -1;
-    }
-
-    // FIELD: TIMESTAMP
-    token = strtok(NULL, "|");
-    if (token != NULL) {
-        frame->timestamp = (uint32_t)strtoul(token, NULL, 10);
-    } else {
-        // Error: Missing TIMESTAMP field
-        return -1;
-    }
-
-    // FIELD: CHECKSUM
-    token = strtok(NULL, "|");
-    if (token != NULL) {
-        frame->checksum = (uint16_t)strtoul(token, NULL, 16);
-    } else {
-        // Error: Missing CHECKSUM field
-        return -1;
-    }
-
-    // FIELD: DATA
-    token = strtok(NULL, "|");
-    if (token != NULL) {
-        size_t dataToCopy = frame->data_length < sizeof(frame->data) - 1
-            ? frame->data_length
-            : sizeof(frame->data) - 1;
-        strncpy(frame->data, token, dataToCopy);
-        frame->data[dataToCopy] = '\0'; // Ensure null termination
-    } else {
-        // Error: Missing DATA field
-        return -1;
-    }
-
-    return 0; // Success
 }
 
 void processCommandWithGotham(const char *command, int gothamSocket) {
@@ -310,8 +188,7 @@ void processCommandWithGotham(const char *command, int gothamSocket) {
     }
 
     Frame response;
-    int result = deserialize_frame(buffer, &response);
-    if (result != 0) {
+    if (deserialize_frame(buffer, &response) != 0) {
         printColor(ANSI_COLOR_RED, "[ERROR]: Error al deserialitzar la resposta de Gotham.\n");
         return;
     }
@@ -327,6 +204,11 @@ void processCommandWithGotham(const char *command, int gothamSocket) {
         printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Connexió establerta amb Gotham!\n");
     } else if (response.type == 0x20 && strcmp(response.data, "STATUS_OK") == 0) { // Manejo de CHECK STATUS
         printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Gotham està funcionant correctament.\n");
+    } else if (response.type == 0xFF){
+        printColor(ANSI_COLOR_YELLOW, "[INFO]: Gotham notifica el tancament del sistema.");
+        close(gothamSocket);
+        printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Tancament controlat completat.");
+        exit(0);
     } else {
         printColor(ANSI_COLOR_RED, "[ERROR]: Resposta inesperada de Gotham: ");
         printColor(ANSI_COLOR_CYAN, response.data);

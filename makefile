@@ -8,33 +8,35 @@
 # 
 # @Descripció: Aquest makefile defineix les regles per a la compilació
 # dels diferents executables del projecte, incloent-hi Fleck, Harley,
-# Enigma i Gotham, així com les dependències comunes (FileReader.c, StringUtils.c, etc.).
-# També proporciona un objectiu per a la neteja dels fitxers generats durant
-# el procés de compilació.
+# Enigma i Gotham, així com les dependències comunes (FileReader.c, StringUtils.c, etc.),
+# i els nous mòduls (FrameUtils.c).
 ##################################################
 
 # Variables
 CC = gcc
-CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking
+CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking -IFrameUtils
+
+# Llista de fitxers comuns
+COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c FrameUtils/FrameUtils.c
 
 # Objectius per compilar cada executable
 all: Fleck.exe Harley.exe Enigma.exe Gotham.exe
 
 # Compilació de Fleck
-Fleck.exe: Fleck.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c
-	$(CC) $(CFLAGS) Fleck.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c -o Fleck.exe
+Fleck.exe: Fleck.c $(COMMON)
+	$(CC) $(CFLAGS) Fleck.c $(COMMON) -o Fleck.exe
 
 # Compilació de Harley
-Harley.exe: Harley.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c
-	$(CC) $(CFLAGS) Harley.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c -o Harley.exe
+Harley.exe: Harley.c $(COMMON)
+	$(CC) $(CFLAGS) Harley.c $(COMMON) -o Harley.exe
 
 # Compilació de Enigma
-Enigma.exe: Enigma.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c
-	$(CC) $(CFLAGS) Enigma.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c -o Enigma.exe
+Enigma.exe: Enigma.c $(COMMON)
+	$(CC) $(CFLAGS) Enigma.c $(COMMON) -o Enigma.exe
 
 # Compilació de Gotham
-Gotham.exe: Gotham.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c
-	$(CC) $(CFLAGS) Gotham.c FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c -o Gotham.exe
+Gotham.exe: Gotham.c $(COMMON)
+	$(CC) $(CFLAGS) Gotham.c $(COMMON) -o Gotham.exe
 
 # Regles per executar automàticament cada programa amb el fitxer de configuració corresponent
 Fleck: Fleck.exe
