@@ -62,6 +62,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
 void registrarWorker(const char *payload, WorkerManager *manager, int client_fd);
 int logoutWorkerBySocket(int socket_fd, WorkerManager *manager);
 WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager);
+void handleDisconnectFrame(const Frame *frame, int client_fd, WorkerManager *manager);
 void handleSigint(int sig);
 void alliberarMemoria(GothamConfig *gothamConfig);
 
@@ -125,13 +126,38 @@ WorkerManager *createWorkerManager() {
     return manager;
 }
 
+void listarWorkers(WorkerManager *manager) {
+    pthread_mutex_lock(&manager->mutex); // Asegura acceso seguro a la lista dinámica
+
+    logInfo("[INFO]: Lista de workers registrados: ");
+    for (int i = 0; i < manager->workerCount; i++) {
+        WorkerInfo *worker = &manager->workers[i];
+        char *log_message;
+        asprintf(&log_message, "\nWorker %d: Tipo: %s, IP: %s, Puerto: %d, Socket FD: %d",
+                    i + 1, worker->type, worker->ip, worker->port, worker->socket_fd);
+        printF(log_message);
+        free(log_message);
+    }
+
+    pthread_mutex_unlock(&manager->mutex);
+}
+
 void registrarWorker(const char *payload, WorkerManager *manager, int client_fd) {
+    logInfo("[INFO]: Iniciando el registro del worker...");
     char type[10] = {0}, ip[16] = {0};
     int port = 0;
+    Frame response = {0};
 
-    // Usamos sscanf para procesar el payload
+    // Procesar el payload del worker
     if (sscanf(payload, "%9[^&]&%15[^&]&%d", type, ip, &port) != 3) {
-        logError("[ERROR]: El payload recibido no tiene el formato esperado (TYPE&IP&PORT).");
+        logError("[ERROR]: El payload no tiene el formato esperado (TYPE&IP&PORT).");
+
+        // Enviar NACK
+        response.type = 0x02;
+        strncpy(response.data, "CON_KO", sizeof(response.data) - 1);
+        response.data_length = strlen(response.data);
+        response.checksum = calculate_checksum(response.data, response.data_length);
+        send_frame(client_fd, &response);
         return;
     }
 
@@ -141,6 +167,19 @@ void registrarWorker(const char *payload, WorkerManager *manager, int client_fd)
     if (manager->workerCount == manager->capacity) {
         manager->capacity *= 2;
         manager->workers = realloc(manager->workers, manager->capacity * sizeof(WorkerInfo));
+        if (!manager->workers) {
+            logError("[ERROR]: Error ampliando la capacidad de workers.");
+
+            // Enviar NACK
+            response.type = 0x02;
+            strncpy(response.data, "CON_KO", sizeof(response.data) - 1);
+            response.data_length = strlen(response.data);
+            response.checksum = calculate_checksum(response.data, response.data_length);
+            send_frame(client_fd, &response);
+
+            pthread_mutex_unlock(&manager->mutex);
+            return;
+        }
     }
 
     // Registrar el nuevo worker
@@ -150,33 +189,40 @@ void registrarWorker(const char *payload, WorkerManager *manager, int client_fd)
     worker->port = port;
     worker->socket_fd = client_fd;
 
-    // Asignar como principal si es el primer worker de su tipo
+    // Asignar como principal si es el primero de su tipo
     if (strcasecmp(type, "TEXT") == 0 && manager->mainTextWorker == NULL) {
         manager->mainTextWorker = worker;
     } else if (strcasecmp(type, "MEDIA") == 0 && manager->mainMediaWorker == NULL) {
         manager->mainMediaWorker = worker;
     }
 
+    // Confirmar registro
+    logSuccess("[SUCCESS]: Worker registrado correctamente.");
     char *log_message;
-    asprintf(&log_message, "[SUCCESS]: Worker registrado correctamente en Gotham.\n"
-                           "Tipo: %s, IP: %s, Puerto: %d, Socket FD: %d\n",
+    asprintf(&log_message, "Tipo: %s, IP: %s, Puerto: %d, Socket FD: %d\n",
              worker->type, worker->ip, worker->port, worker->socket_fd);
-    logSuccess(log_message);
+    printF(log_message);
     free(log_message);
 
     pthread_mutex_unlock(&manager->mutex);
+
+    // Enviar ACK
+    response.type = 0x02;
+    response.data_length = 0;
+    response.checksum = calculate_checksum(response.data, response.data_length);
+    send_frame(client_fd, &response);
 }
 
 
 WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager) {
     if (!filename || !manager) {
-        logError("Nombre de archivo o manager inválido.");
+        logError("[ERROR]: Nombre de archivo o manager inválido.");
         return NULL;
     }
 
     char *extension = strrchr(filename, '.');
     if (!extension) {
-        logError("No se pudo determinar la extensión del archivo.");
+        logError("[ERROR]: No se pudo determinar la extensión del archivo.");
         return NULL;
     }
 
@@ -186,18 +232,24 @@ WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager) {
 
     if (strcasecmp(extension, ".txt") == 0) {
         targetWorker = manager->mainTextWorker;
-        logInfo("Asignando worker principal para archivos de texto.");
+        logInfo("[INFO]: Worker principal asignado para archivos de texto.");
     } else if (strcasecmp(extension, ".wav") == 0 || strcasecmp(extension, ".png") == 0) {
         targetWorker = manager->mainMediaWorker;
-        logInfo("Asignando worker principal para archivos multimedia.");
+        logInfo("[INFO]: Worker principal asignado para archivos multimedia.");
     } else {
-        logError("Extensión no reconocida.");
+        logError("[ERROR]: Extensión no reconocida.");
     }
 
     pthread_mutex_unlock(&manager->mutex);
 
     if (!targetWorker) {
-        logError("No hay workers disponibles para el tipo de archivo.");
+        logError("[ERROR]: No hay workers disponibles para el tipo de archivo.");
+    } else {
+        char *log_message;
+        asprintf(&log_message, "[DEBUG]: Worker encontrado -> IP: %s, Puerto: %d\n",
+                 targetWorker->ip, targetWorker->port);
+        printF(log_message);
+        free(log_message);
     }
 
     return targetWorker;
@@ -332,11 +384,13 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
     }
 
     // Validar el checksum del frame rebut
-    uint16_t calculated_checksum = calculate_checksum(frame->data, frame->data_length);
+    uint16_t calculated_checksum = calculate_checksum(frame->data, frame->data_length);       
     if (calculated_checksum != frame->checksum) {
         logError("Trama amb checksum invàlid.");
         return;
     }
+
+    logSuccess("Checksum correcte.");
 
     // Estructura per preparar la resposta
     Frame response = {0};
@@ -344,8 +398,22 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
 
     switch (frame->type) {
         case 0x01: // CONNECT
-            logSuccess("Client connectat correctament.");
-            response.type = 0x01; // ACK del CONNECT
+            logInfo("[INFO]: Procesando conexión de Fleck...");
+            
+            // Validar datos recibidos (puedes añadir más validaciones según sea necesario)
+            if (frame->data_length == 0) {
+                logError("[ERROR]: Datos de conexión vacíos.");
+                response.type = 0x01;
+                strncpy(response.data, "CONN_KO", sizeof(response.data) - 1);
+                response.data_length = strlen(response.data);
+                response.checksum = calculate_checksum(response.data, response.data_length);
+                send_frame(client_fd, &response);
+                break;
+            }
+
+            // Enviar respuesta de éxito
+            logSuccess("[SUCCESS]: Client connectat correctament.");
+            response.type = 0x01;
             strncpy(response.data, "CONN_OK", sizeof(response.data) - 1);
             response.data_length = strlen(response.data);
             response.checksum = calculate_checksum(response.data, response.data_length);
@@ -355,20 +423,49 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
         case 0x02: // REGISTER
             logInfo("[DEBUG]: Processant registre de worker...");
             registrarWorker(frame->data, manager, client_fd);
-            response.type = 0x02; // ACK del REGISTER
-            strncpy(response.data, "CON_OK", sizeof(response.data) - 1);
-            response.data_length = strlen(response.data);
-            response.checksum = calculate_checksum(response.data, response.data_length);
-            send_frame(client_fd, &response);
+            listarWorkers(manager);
+            break;
+
+        case 0x07:
+            handleDisconnectFrame(frame, client_fd, manager);
             break;
 
         case 0x10: // DISTORT
-            logInfo("[DEBUG]: Processant DISTORT...");
-            // Buscar el worker adequat segons el tipus de fitxer
-            WorkerInfo *targetWorker = buscarWorker(frame->data, manager);
+            logInfo("[INFO]: Procesando comando DISTORT...");
+
+            // Parsear el payload recibido: mediaType y fileName
+            char mediaType[10] = {0};
+            char fileName[256] = {0};
+            if (sscanf(frame->data, "%9[^&]&%255s", mediaType, fileName) != 2) {
+                logError("[ERROR]: Formato de datos incorrecto en comando DISTORT.");
+                response.type = 0x10;
+                strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
+                response.data_length = strlen(response.data);
+                response.checksum = calculate_checksum(response.data, response.data_length);
+                send_frame(client_fd, &response);
+                break;
+            }
+
+            // Verificar si el fileName tiene la extensión correcta según el mediaType
+            char *fileExtension = strrchr(fileName, '.');
+            if (!fileExtension || 
+                (strcasecmp(mediaType, "TEXT") == 0 && strcasecmp(fileExtension, ".txt") != 0) ||
+                (strcasecmp(mediaType, "MEDIA") == 0 && strcasecmp(fileExtension, ".wav") != 0 &&
+                strcasecmp(fileExtension, ".png") != 0 && strcasecmp(fileExtension, ".jpg") != 0)) {
+                logError("[ERROR]: Extensión de archivo no válida o no coincide con mediaType.");
+                response.type = 0x10;
+                strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
+                response.data_length = strlen(response.data);
+                response.checksum = calculate_checksum(response.data, response.data_length);
+                send_frame(client_fd, &response);
+                break;
+            }
+
+            // Buscar worker adecuado
+            WorkerInfo *targetWorker = buscarWorker(fileName, manager);
             if (!targetWorker) {
-                logError("No s'ha trobat cap worker adequat per a aquest fitxer.");
-                response.type = 0x10; // Error del DISTORT
+                logError("[ERROR]: No se encontró un worker para el archivo especificado.");
+                response.type = 0x10;
                 strncpy(response.data, "DISTORT_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
                 response.checksum = calculate_checksum(response.data, response.data_length);
@@ -376,35 +473,17 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
                 break;
             }
 
-            // Connectar-se al worker
-            int workerSocket = connect_to_server(targetWorker->ip, targetWorker->port);
-            if (workerSocket < 0) {
-                logError("Error connectant amb el worker.");
-                response.type = 0x10; // Error del DISTORT
-                strncpy(response.data, "DISTORT_KO", sizeof(response.data) - 1);
-                response.data_length = strlen(response.data);
-                response.checksum = calculate_checksum(response.data, response.data_length);
-                send_frame(client_fd, &response);
-                break;
-            }
+            // Construir la respuesta para Fleck con la información del worker
+            char workerInfo[DATA_MAX_SIZE] = {0};
+            snprintf(workerInfo, sizeof(workerInfo), "%s&%d", targetWorker->ip, targetWorker->port);
+            response.type = 0x10; // Tipo DISTORT
+            strncpy(response.data, workerInfo, sizeof(response.data) - 1);
+            response.data_length = strlen(response.data);
+            response.checksum = calculate_checksum(response.data, response.data_length);
 
-            // Reenviar el frame al worker
-            send_frame(workerSocket, frame);
-
-            // Llegir la resposta del worker
-            Frame workerResponse;
-            if (receive_frame(workerSocket, &workerResponse) == 0) {
-                send_frame(client_fd, &workerResponse);
-            } else {
-                logError("No s'ha rebut resposta del worker.");
-                response.type = 0x10; // Error del DISTORT
-                strncpy(response.data, "DISTORT_KO", sizeof(response.data) - 1);
-                response.data_length = strlen(response.data);
-                response.checksum = calculate_checksum(response.data, response.data_length);
-                send_frame(client_fd, &response);
-            }
-
-            close(workerSocket); // Tancar la connexió amb el worker
+            // Enviar la información del worker a Fleck
+            logInfo("[INFO]: Enviando información del worker a Fleck...");
+            send_frame(client_fd, &response);
             break;
 
         case 0x20: // CHECK STATUS
@@ -413,6 +492,63 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             strncpy(response.data, "STATUS_OK", sizeof(response.data) - 1);
             response.data_length = strlen(response.data);
             response.checksum = calculate_checksum(response.data, response.data_length);
+            send_frame(client_fd, &response);
+            break;
+
+        case 0x11: //REASINGAR WORKER
+            logInfo("[INFO]: Procesando solicitud de reasignación de Worker...");
+
+            // Parsear datos: <mediaType>&<FileName>
+            char mediaType0x11[10] = {0};
+            char fileName0x11[256] = {0};
+            if (sscanf(frame->data, "%9[^&]&%255s", mediaType0x11, fileName0x11) != 2) {
+                logError("[ERROR]: Formato inválido en la solicitud de reasignación.");
+                response.type = 0x11;
+                strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
+                response.data_length = strlen(response.data);
+                response.checksum = calculate_checksum(response.data, response.data_length);
+                send_frame(client_fd, &response);
+                break;
+            }
+
+             // Verificar la extensión del archivo coincide con el mediaType
+            char *fileExtension0x11 = strrchr(fileName0x11, '.');
+            if (!fileExtension0x11 ||
+                (strcasecmp(mediaType0x11, "TEXT") == 0 && strcasecmp(fileExtension0x11, ".txt") != 0) ||
+                (strcasecmp(mediaType0x11, "MEDIA") == 0 &&
+                strcasecmp(fileExtension0x11, ".wav") != 0 &&
+                strcasecmp(fileExtension0x11, ".png") != 0 &&
+                strcasecmp(fileExtension0x11, ".jpg") != 0)) {
+                logError("[ERROR]: Extensión de archivo no válida o no coincide con el mediaType.");
+                response.type = 0x11;
+                strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
+                response.data_length = strlen(response.data);
+                response.checksum = calculate_checksum(response.data, response.data_length);
+                send_frame(client_fd, &response);
+                break;
+            }
+
+            // Buscar un Worker disponible
+            WorkerInfo *targetWorkerCaiguda = buscarWorker(fileName0x11, manager);
+            if (!targetWorkerCaiguda) {
+                logError("[ERROR]: No hay Workers disponibles para el tipo especificado.");
+                response.type = 0x11;
+                strncpy(response.data, "DISTORT_KO", sizeof(response.data) - 1);
+                response.data_length = strlen(response.data);
+                response.checksum = calculate_checksum(response.data, response.data_length);
+                send_frame(client_fd, &response);
+                break;
+            }
+
+            // Responder con la información del Worker
+            char workerInfo0x11[DATA_MAX_SIZE] = {0};
+            snprintf(workerInfo0x11, sizeof(workerInfo0x11), "%s&%d", targetWorkerCaiguda->ip, targetWorkerCaiguda->port);
+            response.type = 0x11;
+            strncpy(response.data, workerInfo0x11, sizeof(response.data) - 1);
+            response.data_length = strlen(response.data);
+            response.checksum = calculate_checksum(response.data, response.data_length);
+
+            logInfo("[INFO]: Enviando información del Worker reasignado...");
             send_frame(client_fd, &response);
             break;
 
@@ -427,6 +563,27 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
     }
 }
 
+void handleDisconnectFrame(const Frame *frame, int client_fd, WorkerManager *manager) {
+    if (frame->data_length == 0) {
+        logError("[ERROR]: Desconexión recibida sin datos válidos.");
+        return;
+    }
+
+    logInfo("[INFO]: Procesando solicitud de desconexión...");
+    if (frame->type == 0x07) {
+        // Desconexión de un Worker
+        if (strstr(frame->data, "TEXT") || strstr(frame->data, "MEDIA")) {
+            if (logoutWorkerBySocket(client_fd, manager) == 0) {
+                logInfo("[INFO]: Worker desconectado correctamente.");
+                listarWorkers(manager);
+            } else {
+                logError("[ERROR]: No se encontró el Worker para desconectar.");
+            }
+        } else { // Desconexión de un Fleck
+            logInfo("[INFO]: Fleck desconectado correctamente.");
+        }
+    }
+}
 
 void alliberarMemoria(GothamConfig *gothamConfig) {
     if (gothamConfig->ipFleck) free(gothamConfig->ipFleck);

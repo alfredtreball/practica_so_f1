@@ -20,15 +20,23 @@ CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking 
 COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c FrameUtils/FrameUtils.c
 
 # Objectius per compilar cada executable
-all: Fleck.exe Harley.exe Enigma.exe Gotham.exe
+all: Fleck.exe Fleck1.exe Harley.exe Harley1.exe Enigma.exe Gotham.exe
 
 # Compilació de Fleck
 Fleck.exe: Fleck.c $(COMMON)
 	$(CC) $(CFLAGS) Fleck.c $(COMMON) -o Fleck.exe
 
+# Compilació de Fleck1 (una còpia per usar config_fleck1.dat)
+Fleck1.exe: Fleck1.c $(COMMON)
+	$(CC) $(CFLAGS) Fleck1.c $(COMMON) -o Fleck1.exe
+
 # Compilació de Harley
 Harley.exe: Harley.c $(COMMON)
 	$(CC) $(CFLAGS) Harley.c $(COMMON) -o Harley.exe
+
+# Compilació de Harley1
+Harley1.exe: Harley1.c $(COMMON)
+	$(CC) $(CFLAGS) Harley1.c $(COMMON) -o Harley1.exe
 
 # Compilació de Enigma
 Enigma.exe: Enigma.c $(COMMON)
@@ -42,8 +50,15 @@ Gotham.exe: Gotham.c $(COMMON)
 Fleck: Fleck.exe
 	./Fleck.exe fitxers_configuració/config_fleck.dat
 
+Fleck1: Fleck1.exe
+	./Fleck1.exe fitxers_configuració/config_fleck1.dat
+
 Harley: Harley.exe
 	./Harley.exe fitxers_configuració/config_harley.dat
+
+Harley1: Harley1.exe
+	./Harley1.exe fitxers_configuració/config_harley1.dat
+
 
 Enigma: Enigma.exe
 	./Enigma.exe fitxers_configuració/config_enigma.dat

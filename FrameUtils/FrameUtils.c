@@ -10,42 +10,68 @@ void serialize_frame(const Frame *frame, char *buffer) {
     if (!frame || !buffer) return;
 
     memset(buffer, 0, FRAME_SIZE);
-    snprintf(buffer, FRAME_SIZE, "%02x|%04x|%u|%04x|%s",
-             frame->type, frame->data_length, frame->timestamp,
-             frame->checksum, frame->data);
+
+    // Truncar datos si exceden el tamaño permitido
+    char truncated_data[DATA_MAX_SIZE + 1] = {0};
+    strncpy(truncated_data, frame->data, DATA_MAX_SIZE);
+
+    // Serializar los campos en el formato correcto
+    int written = snprintf(buffer, FRAME_SIZE, "%02x&%04x&%08x&%04x&",
+                            frame->type, frame->data_length,
+                            frame->timestamp, frame->checksum);
+
+    if (written < 0 || written >= FRAME_SIZE) {
+        fprintf(stderr, "[ERROR][Serialize] Buffer insuficiente al serializar\n");
+        return;
+    }
+
+    // Concatenar los datos al buffer solo si DATA_LENGTH > 0
+    if (frame->data_length > 0) {
+        strncat(buffer, truncated_data, FRAME_SIZE - written - 1);
+    }
 }
 
 // Deserializa un buffer en un frame
 int deserialize_frame(const char *buffer, Frame *frame) {
     if (!buffer || !frame) return -1;
 
-    char localBuffer[FRAME_SIZE];
-    strncpy(localBuffer, buffer, FRAME_SIZE - 1);
-    localBuffer[FRAME_SIZE - 1] = '\0'; // Asegurar terminación nula
+    memset(frame, 0, sizeof(Frame)); // Limpiar la estructura del frame
 
-    char *token = strtok(localBuffer, "|");
-    if (!token) return -1;
-    frame->type = (uint8_t)strtoul(token, NULL, 16);
+    char data[DATA_MAX_SIZE + 1] = {0}; // Buffer temporal para los datos
 
-    token = strtok(NULL, "|");
-    if (!token) return -1;
-    frame->data_length = (uint16_t)strtoul(token, NULL, 16);
+    // Extraer los campos del frame
+    int fields_read = sscanf(buffer, "%2hhx&%4hx&%8x&%4hx&%1023s",
+                             &frame->type, &frame->data_length,
+                             &frame->timestamp, &frame->checksum,
+                             data);
 
-    token = strtok(NULL, "|");
-    if (!token) return -1;
-    frame->timestamp = (uint32_t)strtoul(token, NULL, 10);
+    printf("[DEBUG][Gotham] Fields read: %d\n", fields_read);
 
-    token = strtok(NULL, "|");
-    if (!token) return -1;
-    frame->checksum = (uint16_t)strtoul(token, NULL, 16);
+    // Validar que se hayan leído los campos obligatorios
+    if (fields_read < 4) { // DATA es opcional si DATA_LENGTH = 0
+        fprintf(stderr, "[ERROR][Deserialize] Formato inválido en el frame\n");
+        return -1;
+    }
 
-    token = strtok(NULL, "|");
-    if (!token) return -1;
-    strncpy(frame->data, token, frame->data_length);
-    frame->data[frame->data_length] = '\0'; // Terminación nula
+    // Validar longitud de los datos
+    if (frame->data_length > DATA_MAX_SIZE) {
+        fprintf(stderr, "[ERROR][Deserialize] Longitud de datos excede el máximo permitido\n");
+        return -1;
+    }
 
-    return 0; // Éxito
+    // Si DATA_LENGTH > 0, copiar los datos al frame
+    if (frame->data_length > 0) {
+        strncpy(frame->data, data, frame->data_length);
+        frame->data[frame->data_length] = '\0'; // Asegurar terminación nula
+    } else {
+        frame->data[0] = '\0'; // DATA vacío
+    }
+
+    printf("[DEBUG][Gotham] Frame deserializado: Type=%02x, DATA_LENGTH=%04x, Checksum=%04x, Data='%s'\n",
+           frame->type, frame->data_length, frame->checksum, frame->data);
+    return 0; // Deserialización exitosa
 }
+
 
 // Envía un frame a través de un socket
 int send_frame(int socket_fd, const Frame *frame) {
@@ -64,21 +90,47 @@ int send_frame(int socket_fd, const Frame *frame) {
 
 // Recibe un frame desde un socket
 int receive_frame(int socket_fd, Frame *frame) {
-    if (!frame) return -1;
+    if (!frame) {
+        fprintf(stderr, "[ERROR][ReceiveFrame] Frame no válido (puntero NULL).\n");
+        return -1;
+    }
 
     char buffer[FRAME_SIZE];
-    if (read(socket_fd, buffer, FRAME_SIZE) <= 0) {
-        perror("Error recibiendo el frame");
+    ssize_t bytesRead = read(socket_fd, buffer, FRAME_SIZE);
+
+    if (bytesRead < 0) {
+        // Caso de error al leer
+        perror("[ERROR][ReceiveFrame] Error recibiendo el frame");
+        return -1;
+    } else if (bytesRead == 0) {
+        // Caso de conexión cerrada ordenadamente
+        fprintf(stderr, "[INFO][ReceiveFrame] Conexión cerrada por el peer (socket %d).\n", socket_fd);
         return -1;
     }
 
+    if (bytesRead != FRAME_SIZE) {
+        // Un frame debería ser exactamente de tamaño `FRAME_SIZE`
+        fprintf(stderr, "[ERROR][ReceiveFrame] Frame incompleto recibido. Bytes leídos: %zd\n", bytesRead);
+        return -1;
+    }
+
+    // Debug: Mostrar el contenido del buffer recibido
+    printf("[DEBUG][ReceiveFrame] Buffer recibido: %.*s\n", (int)bytesRead, buffer);
+
+    // Intentar deserializar el frame
     if (deserialize_frame(buffer, frame) != 0) {
-        printF("Error deserializando el frame recibido\n");
+        fprintf(stderr, "[ERROR][ReceiveFrame] Error deserializando el frame recibido\n");
         return -1;
     }
 
-    return 0;
+    // Debug: Mostrar información del frame deserializado
+    printf("[DEBUG][ReceiveFrame] Frame deserializado correctamente: "
+           "Type=%02x, Length=%04x, Timestamp=%08x, Checksum=%04x, Data=%s\n",
+           frame->type, frame->data_length, frame->timestamp, frame->checksum, frame->data);
+
+    return 0; // Éxito
 }
+
 
 // Calcula el checksum de un conjunto de datos
 uint16_t calculate_checksum(const char *data, size_t length) {
