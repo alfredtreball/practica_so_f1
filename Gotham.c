@@ -29,6 +29,7 @@
 #include "DataConversion/DataConversion.h"
 #include "Networking/Networking.h"
 #include "FrameUtils/FrameUtils.h"
+#include "Logging/Logging.h"
 
 // Representa un worker que es connecta a Gotham
 typedef struct {
@@ -48,25 +49,46 @@ typedef struct {
     pthread_mutex_t mutex;      // Mutex per sincronitzar l'accés
 } WorkerManager;
 
+typedef struct {
+    char username[64]; // Nombre de usuario del cliente
+    char ip[16];       // Dirección IP del cliente
+    int socket_fd;     // Descriptor del socket del cliente
+} ClientInfo;
+
+typedef struct {
+    ClientInfo *clients;     // Lista dinámica de clientes
+    int clientCount;         // Número de clientes conectados
+    int capacity;            // Capacidad actual de la lista
+    pthread_mutex_t mutex;   // Mutex para sincronización
+} ClientManager;
+
+typedef struct {
+    int client_fd;
+    WorkerManager *workerManager;
+    ClientManager *clientManager;
+} ConnectionArgs;
+
+WorkerManager *workerManager = NULL;
+ClientManager *clientManager = NULL;
+
 // Declaració de funcions
 void mostrarCaratula();
-void logInfo(const char *msg);
-void logWarning(const char *msg);
-void logError(const char *msg);
-void logSuccess(const char *msg);
 WorkerManager *createWorkerManager();
 void freeWorkerManager(WorkerManager *manager);
 void *gestionarConexion(void *arg);
-void *esperarConexiones(void *arg);
-void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *manager);
+void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *manager, ClientManager *clientManager);
 void registrarWorker(const char *payload, WorkerManager *manager, int client_fd);
+void asignarNuevoWorkerPrincipal(WorkerInfo *worker);
 int logoutWorkerBySocket(int socket_fd, WorkerManager *manager);
 WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager);
-void handleDisconnectFrame(const Frame *frame, int client_fd, WorkerManager *manager);
+void handleDisconnectFrame(const Frame *frame, int client_fd, WorkerManager *manager, ClientManager *clientManager);
+ClientManager *createClientManager();
+void freeClientManager(ClientManager *manager);
+void addClient(ClientManager *manager, const char *username, const char *ip, int socket_fd);
+void removeClientBySocket(ClientManager *manager, int socket_fd);
+void listClients(ClientManager *manager);
 void handleSigint(int sig);
 void alliberarMemoria(GothamConfig *gothamConfig);
-
-WorkerManager *workerManager = NULL;
 
 // Mostra una caràtula informativa al terminal
 void mostrarCaratula() {
@@ -82,47 +104,148 @@ void mostrarCaratula() {
     printF(RESET);
 }
 
-// Funcions de registre de logs
-void logInfo(const char *msg) {
-    printF(CYAN "[INFO]: " RESET);
-    printF(msg);
-    printF("\n");
+// Crea un nou gestor de clients
+ClientManager *createClientManager() {
+    ClientManager *manager = malloc(sizeof(ClientManager));
+    if (!manager) {
+        perror("Error al inicializar ClientManager");
+        exit(EXIT_FAILURE);
+    }
+
+    manager->capacity = 10;
+    manager->clientCount = 0;
+    manager->clients = calloc(manager->capacity, sizeof(ClientInfo));
+    if (!manager->clients) {
+        perror("Error al inicializar la lista de clientes");
+        free(manager);
+        exit(EXIT_FAILURE);
+    }
+
+    if (pthread_mutex_init(&manager->mutex, NULL) != 0) {
+        perror("Error al inicializar el mutex de ClientManager");
+        free(manager->clients);
+        free(manager);
+        exit(EXIT_FAILURE);
+    }
+
+    logInfo("[DEBUG]: ClientManager creado con éxito.");
+    return manager;
 }
 
-void logWarning(const char *msg) {
-    printF(YELLOW "[WARNING]: " RESET);
-    printF(msg);
-    printF("\n");
+// Libera la memoria del ClientManager
+void freeClientManager(ClientManager *manager) {
+    if (manager) {
+        free(manager->clients);
+        pthread_mutex_destroy(&manager->mutex);
+        free(manager);
+    }
 }
 
-void logError(const char *msg) {
-    printF(RED "[ERROR]: " RESET);
-    printF(msg);
-    printF("\n");
+// Añade un cliente a la lista dinámica
+void addClient(ClientManager *manager, const char *username, const char *ip, int socket_fd) {
+    pthread_mutex_lock(&manager->mutex);
+
+    // Verificar si el cliente ya está registrado
+    for (int i = 0; i < manager->clientCount; i++) {
+        if (strcmp(manager->clients[i].username, username) == 0) {
+            strncpy(manager->clients[i].ip, ip, sizeof(manager->clients[i].ip) - 1);
+            manager->clients[i].socket_fd = socket_fd;
+            logInfo("[INFO]: Cliente existente actualizado.");
+            pthread_mutex_unlock(&manager->mutex);
+            return;
+        }
+    }
+
+    // Ampliar la capacidad si es necesario
+    if (manager->clientCount == manager->capacity) {
+        manager->capacity *= 2;
+        ClientInfo *new_clients = realloc(manager->clients, manager->capacity * sizeof(ClientInfo));
+        if (!new_clients) {
+            logError("[ERROR]: Error al ampliar la capacidad de clientes.");
+            pthread_mutex_unlock(&manager->mutex);
+            return;
+        }
+        manager->clients = new_clients;
+    }
+
+    // Añadir un nuevo cliente
+    ClientInfo *client = &manager->clients[manager->clientCount++];
+    strncpy(client->username, username, sizeof(client->username) - 1);
+    strncpy(client->ip, ip, sizeof(client->ip) - 1);
+    client->socket_fd = socket_fd;
+
+    logInfo("[INFO]: Cliente añadido exitosamente.");
+    pthread_mutex_unlock(&manager->mutex);
 }
 
-void logSuccess(const char *msg) {
-    printF(GREEN "[SUCCESS]: " RESET);
-    printF(msg);
-    printF("\n");
+
+// Elimina un cliente de la lista por su socket
+void removeClientBySocket(ClientManager *manager, int socket_fd) {
+    pthread_mutex_lock(&manager->mutex);
+
+    for (int i = 0; i < manager->clientCount; i++) {
+        if (manager->clients[i].socket_fd == socket_fd) {
+            // Mueve el último cliente al lugar del eliminado
+            if (i != manager->clientCount - 1) {
+                manager->clients[i] = manager->clients[manager->clientCount - 1];
+            }
+            manager->clientCount--;
+            logInfo("[INFO]: Cliente eliminado de la lista.");
+            break;
+        }
+    }
+
+    pthread_mutex_unlock(&manager->mutex);
+}
+
+// Lista los clientes conectados
+void listClients(ClientManager *manager) {
+    pthread_mutex_lock(&manager->mutex);
+
+    if (manager->clientCount == 0) {
+        logInfo("No hay clientes conectados.");
+    } else {
+        logInfo("Lista de clientes conectados:");
+        for (int i = 0; i < manager->clientCount; i++) {
+            ClientInfo *client = &manager->clients[i];
+            char log_message[256];
+            snprintf(log_message, sizeof(log_message), "Cliente %d: Usuario: %s, IP: %s, Socket: %d",
+                     i + 1, client->username, client->ip, client->socket_fd);
+            logInfo(log_message);
+        }
+    }
+
+    pthread_mutex_unlock(&manager->mutex);
 }
 
 // Crea un nou gestor de workers
 WorkerManager *createWorkerManager() {
     WorkerManager *manager = malloc(sizeof(WorkerManager));
     if (!manager) {
-        perror("Error inicialitzant WorkerManager");
+        perror("Error al inicializar WorkerManager");
         exit(EXIT_FAILURE);
     }
+
     manager->capacity = 10;
     manager->workerCount = 0;
-    manager->workers = malloc(manager->capacity * sizeof(WorkerInfo));
+    manager->workers = calloc(manager->capacity, sizeof(WorkerInfo));
     if (!manager->workers) {
-        perror("Error inicialitzant la llista de workers");
+        perror("Error al inicializar la lista de workers");
         free(manager);
         exit(EXIT_FAILURE);
     }
-    pthread_mutex_init(&manager->mutex, NULL);
+
+    if (pthread_mutex_init(&manager->mutex, NULL) != 0) {
+        perror("Error al inicializar el mutex de WorkerManager");
+        free(manager->workers);
+        free(manager);
+        exit(EXIT_FAILURE);
+    }
+
+    manager->mainTextWorker = NULL;
+    manager->mainMediaWorker = NULL;
+
+    logInfo("[DEBUG]: WorkerManager creado con éxito.");
     return manager;
 }
 
@@ -133,7 +256,7 @@ void listarWorkers(WorkerManager *manager) {
     for (int i = 0; i < manager->workerCount; i++) {
         WorkerInfo *worker = &manager->workers[i];
         char *log_message;
-        asprintf(&log_message, "\nWorker %d: Tipo: %s, IP: %s, Puerto: %d, Socket FD: %d",
+        asprintf(&log_message, "\nWorker %d: Tipo: %s, IP: %s, Puerto: %d, Socket FD: %d\n",
                     i + 1, worker->type, worker->ip, worker->port, worker->socket_fd);
         printF(log_message);
         free(log_message);
@@ -143,47 +266,45 @@ void listarWorkers(WorkerManager *manager) {
 }
 
 void registrarWorker(const char *payload, WorkerManager *manager, int client_fd) {
-    logInfo("[INFO]: Iniciando el registro del worker...");
+    if (!manager || !payload) {
+        logError("[ERROR]: Parámetros inválidos en registrarWorker.");
+        return;
+    }
+
+    logInfo("[INFO]: Iniciando el registro del worker...\n");
+
     char type[10] = {0}, ip[16] = {0};
     int port = 0;
-    Frame response = {0};
 
-    // Procesar el payload del worker
     if (sscanf(payload, "%9[^&]&%15[^&]&%d", type, ip, &port) != 3) {
-        logError("[ERROR]: El payload no tiene el formato esperado (TYPE&IP&PORT).");
-
-        // Enviar NACK
+        logError("[ERROR]: Payload inválido (esperado TYPE&IP&PORT).");
+        Frame response = {0};
         response.type = 0x02;
         strncpy(response.data, "CON_KO", sizeof(response.data) - 1);
         response.data_length = strlen(response.data);
-        response.checksum = calculate_checksum(response.data, response.data_length);
+        response.checksum = calculate_checksum(response.data, response.data_length, 1);
         send_frame(client_fd, &response);
         return;
     }
 
     pthread_mutex_lock(&manager->mutex);
 
-    // Ampliar la capacidad si es necesario
+    // Ampliar capacidad si es necesario
     if (manager->workerCount == manager->capacity) {
+        logInfo("[DEBUG]: Ampliando capacidad del WorkerManager...");
         manager->capacity *= 2;
-        manager->workers = realloc(manager->workers, manager->capacity * sizeof(WorkerInfo));
-        if (!manager->workers) {
-            logError("[ERROR]: Error ampliando la capacidad de workers.");
-
-            // Enviar NACK
-            response.type = 0x02;
-            strncpy(response.data, "CON_KO", sizeof(response.data) - 1);
-            response.data_length = strlen(response.data);
-            response.checksum = calculate_checksum(response.data, response.data_length);
-            send_frame(client_fd, &response);
-
+        WorkerInfo *temp = realloc(manager->workers, manager->capacity * sizeof(WorkerInfo));
+        if (!temp) {
+            logError("[ERROR]: Fallo al ampliar la capacidad de WorkerManager.");
             pthread_mutex_unlock(&manager->mutex);
             return;
         }
+        manager->workers = temp;
     }
 
-    // Registrar el nuevo worker
+    // Registrar nuevo worker
     WorkerInfo *worker = &manager->workers[manager->workerCount++];
+    memset(worker, 0, sizeof(WorkerInfo));
     strncpy(worker->type, type, sizeof(worker->type) - 1);
     strncpy(worker->ip, ip, sizeof(worker->ip) - 1);
     worker->port = port;
@@ -196,33 +317,27 @@ void registrarWorker(const char *payload, WorkerManager *manager, int client_fd)
         manager->mainMediaWorker = worker;
     }
 
-    // Confirmar registro
-    logSuccess("[SUCCESS]: Worker registrado correctamente.");
-    char *log_message;
-    asprintf(&log_message, "Tipo: %s, IP: %s, Puerto: %d, Socket FD: %d\n",
-             worker->type, worker->ip, worker->port, worker->socket_fd);
-    printF(log_message);
-    free(log_message);
-
     pthread_mutex_unlock(&manager->mutex);
 
+    logSuccess("[SUCCESS]: Worker registrado correctamente.\n");
+
     // Enviar ACK
+    Frame response = {0};
     response.type = 0x02;
     response.data_length = 0;
-    response.checksum = calculate_checksum(response.data, response.data_length);
+    response.checksum = calculate_checksum(response.data, response.data_length, 1);
     send_frame(client_fd, &response);
 }
 
-
 WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager) {
     if (!filename || !manager) {
-        logError("[ERROR]: Nombre de archivo o manager inválido.");
+        logError("[ERROR]: Nombre de archivo o manager inválido.\n");
         return NULL;
     }
 
     char *extension = strrchr(filename, '.');
     if (!extension) {
-        logError("[ERROR]: No se pudo determinar la extensión del archivo.");
+        logError("[ERROR]: No se pudo determinar la extensión del archivo.\n");
         return NULL;
     }
 
@@ -231,43 +346,164 @@ WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager) {
     WorkerInfo *targetWorker = NULL;
 
     if (strcasecmp(extension, ".txt") == 0) {
-        targetWorker = manager->mainTextWorker;
-        logInfo("[INFO]: Worker principal asignado para archivos de texto.");
-    } else if (strcasecmp(extension, ".wav") == 0 || strcasecmp(extension, ".png") == 0) {
-        targetWorker = manager->mainMediaWorker;
-        logInfo("[INFO]: Worker principal asignado para archivos multimedia.");
+        if (manager->mainTextWorker && manager->mainTextWorker->ip[0] != '\0') {
+            targetWorker = manager->mainTextWorker;
+            logInfo("[INFO]: Worker principal asignado para archivos de texto.\n");
+        } else {
+            logError("[ERROR]: No hay un Worker principal asignado para archivos de texto.\n");
+        }
+    } else if (strcasecmp(extension, ".wav") == 0 || strcasecmp(extension, ".png") == 0 || strcasecmp(extension, ".jpg") == 0) {
+        if (manager->mainMediaWorker && manager->mainMediaWorker->ip[0] != '\0') {
+            targetWorker = manager->mainMediaWorker;
+            logInfo("[INFO]: Worker principal asignado para archivos multimedia.\n");
+        } else {
+            logError("[ERROR]: No hay un Worker principal asignado para archivos multimedia.\n");
+        }
     } else {
-        logError("[ERROR]: Extensión no reconocida.");
+        logError("[ERROR]: Extensión no reconocida.\n");
+    }
+
+    if (!targetWorker) {
+        logError("[ERROR]: No hay workers disponibles para el tipo de archivo.\n");
+        pthread_mutex_unlock(&manager->mutex);
+        return NULL;
+    }
+
+    // Validar los campos del Worker antes de usarlo
+    if (targetWorker->ip[0] == '\0' || targetWorker->port <= 0) {
+        logError("[ERROR]: Worker tiene datos inválidos.\n");
+        pthread_mutex_unlock(&manager->mutex);
+        return NULL;
+    }
+
+    if (targetWorker) {
+        char log_message[256];
+        snprintf(log_message, sizeof(log_message), "[INFO]: Worker encontrado -> IP: %s, Puerto: %d\n",
+                 targetWorker->ip, targetWorker->port);
+        printF(log_message);
+    } else {
+        logError("[ERROR]: No hay workers disponibles para el tipo de archivo.\n");
     }
 
     pthread_mutex_unlock(&manager->mutex);
+    return targetWorker;
+}
 
-    if (!targetWorker) {
-        logError("[ERROR]: No hay workers disponibles para el tipo de archivo.");
-    } else {
-        char *log_message;
-        asprintf(&log_message, "[DEBUG]: Worker encontrado -> IP: %s, Puerto: %d\n",
-                 targetWorker->ip, targetWorker->port);
-        printF(log_message);
-        free(log_message);
+void asignarNuevoWorkerPrincipal(WorkerInfo *worker) {
+    if (!worker) {
+        logError("[ERROR]: Worker no válido para asignar como principal.");
+        return;
     }
 
-    return targetWorker;
+    Frame frame = {0};
+    frame.type = 0x08;  // Tipo de trama para asignar principal
+    frame.data_length = 0;  // Sin datos adicionales
+    frame.timestamp = (uint32_t)time(NULL);
+    frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
+
+    logInfo("[INFO]: Asignando nuevo Worker principal...");
+    if (send_frame(worker->socket_fd, &frame) == 0) {
+        logSuccess("[SUCCESS]: Trama 0x08 enviada correctamente al Worker principal.");
+    } else {
+        logError("[ERROR]: Error enviando la trama 0x08 al Worker principal.");
+    }
 }
 
 int logoutWorkerBySocket(int socket_fd, WorkerManager *manager) {
     pthread_mutex_lock(&manager->mutex);
+
+    int found = 0;
     for (int i = 0; i < manager->workerCount; i++) {
         if (manager->workers[i].socket_fd == socket_fd) {
-            manager->workers[i] = manager->workers[--manager->workerCount];
-            pthread_mutex_unlock(&manager->mutex);
-            return 0;
+            found = 1;
+
+            // Si es principal, reasignar
+            if (manager->mainTextWorker == &manager->workers[i]) {
+                manager->mainTextWorker = NULL;
+            }
+            if (manager->mainMediaWorker == &manager->workers[i]) {
+                manager->mainMediaWorker = NULL;
+            }
+
+            // Reemplaza el worker eliminado por el último de la lista
+            if (i != manager->workerCount - 1) {
+                manager->workers[i] = manager->workers[manager->workerCount - 1];
+            }
+            manager->workerCount--;
+            break;
         }
     }
+
     pthread_mutex_unlock(&manager->mutex);
-    return -1;
+
+    if (!found) {
+        logWarning("[WARNING]: Worker no encontrado con el socket proporcionado.");
+        return -1;
+    }
+
+    logInfo("[INFO]: Worker eliminado correctamente.");
+    return 0;
 }
 
+void reasignarWorkersPrincipales(WorkerManager *manager) {
+    if (!manager || !manager->workers) {
+        logError("[ERROR]: WorkerManager o la lista de Workers es NULL.");
+        return;
+    }
+
+    pthread_mutex_lock(&manager->mutex);
+
+    for (int i = 0; i < manager->workerCount; i++) {
+        if (manager->mainTextWorker == NULL && strcasecmp(manager->workers[i].type, "TEXT") == 0) {
+            manager->mainTextWorker = &manager->workers[i];
+            logInfo("[INFO]: Nuevo Worker principal de texto asignado.");
+            asignarNuevoWorkerPrincipal(manager->mainTextWorker);
+        }
+        if (manager->mainMediaWorker == NULL && strcasecmp(manager->workers[i].type, "MEDIA") == 0) {
+            manager->mainMediaWorker = &manager->workers[i];
+            logInfo("[INFO]: Nuevo Worker principal de multimedia asignado.");
+            asignarNuevoWorkerPrincipal(manager->mainMediaWorker);
+        }
+    }
+
+    pthread_mutex_unlock(&manager->mutex);
+}
+
+
+void handleWorkerFailure(const char *mediaType, WorkerManager *manager, int client_fd) {
+    if (!mediaType || !manager) {
+        logError("[ERROR]: Parámetros inválidos en handleWorkerFailure.\n");
+        return;
+    }
+
+    logError("[ERROR]: Worker falló durante la operación DISTORT.\n");
+
+    pthread_mutex_lock(&manager->mutex);
+
+    WorkerInfo *newWorker = NULL;
+    for (int i = 0; i < manager->workerCount; i++) {
+        WorkerInfo *worker = &manager->workers[i];
+        if (strcasecmp(worker->type, mediaType) == 0) {
+            newWorker = worker;
+            break;
+        }
+    }
+
+    pthread_mutex_unlock(&manager->mutex);
+
+    Frame response = {0};
+    response.type = 0x11; // Tipo de trama para la reasignación
+    if (newWorker) {
+        snprintf(response.data, sizeof(response.data), "%s&%d", newWorker->ip, newWorker->port);
+        response.data_length = strlen(response.data);
+    } else {
+        logError("[ERROR]: No hay Workers disponibles para reasignar.");
+        strncpy(response.data, "DISTORT_KO", sizeof(response.data) - 1);
+        response.data_length = strlen(response.data);
+    }
+    response.checksum = calculate_checksum(response.data, response.data_length, 0);
+    send_frame(client_fd, &response);
+}
 
 // Allibera la memòria utilitzada pel WorkerManager
 void freeWorkerManager(WorkerManager *manager) {
@@ -280,90 +516,49 @@ void freeWorkerManager(WorkerManager *manager) {
 
 // Gestiona la connexió amb un client
 void *gestionarConexion(void *arg) {
-    int client_fd = *(int *)arg;
-    WorkerManager *manager = *((WorkerManager **)((int *)arg + 1));
+    ConnectionArgs *args = (ConnectionArgs *)arg;
+    int client_fd = args->client_fd;
+    WorkerManager *workerManager = args->workerManager;
+    ClientManager *clientManager = args->clientManager;
 
-    free(arg);
+    free(args); // Liberamos args una vez
+
+    if (!workerManager || !clientManager) {
+        logError("[ERROR]: WorkerManager o ClientManager NULL en gestionarConexion.");
+        close(client_fd);
+        return NULL;
+    }
 
     Frame frame;
-    while (receive_frame(client_fd, &frame) == 0) {
-        processCommandInGotham(&frame, client_fd, manager);
+    int disconnectHandled = 0;
+
+    // Manejo de frames
+    if (receive_frame(client_fd, &frame) != 0) {
+        logError("[ERROR]: Error al recibir el primer frame del cliente.");
+        close(client_fd);
+        return NULL;
     }
 
-    pthread_mutex_lock(&manager->mutex);
-    logoutWorkerBySocket(client_fd, manager);
-    pthread_mutex_unlock(&manager->mutex);
+    processCommandInGotham(&frame, client_fd, workerManager, clientManager);
+
+    while (receive_frame(client_fd, &frame) == 0) {
+        if (frame.type == 0x07) {
+            logInfo("[DEBUG]: Trama de desconexión recibida.");
+            handleDisconnectFrame(&frame, client_fd, workerManager, clientManager);
+            disconnectHandled = 1;
+            break;
+        }
+
+        processCommandInGotham(&frame, client_fd, workerManager, clientManager);
+    }
+
+    if (!disconnectHandled) {
+        logInfo("[INFO]: El cliente cerró la conexión sin trama de desconexión.");
+        removeClientBySocket(clientManager, client_fd);
+    }
 
     close(client_fd);
-    return NULL;
-}
-
-// Espera connexions entrants i crea fils per gestionar-les
-void *esperarConexiones(void *arg) {
-    int *server_fds = (int *)arg;
-    int server_fd_fleck = server_fds[0];
-    int server_fd_enigma = server_fds[1];
-    int server_fd_harley = server_fds[2];
-
-    fd_set read_fds;
-    int max_fd = server_fd_fleck > server_fd_enigma ? server_fd_fleck : server_fd_enigma;
-    max_fd = server_fd_harley > max_fd ? server_fd_harley : max_fd;
-
-    WorkerManager *manager = createWorkerManager();
-
-    while (1) {
-        FD_ZERO(&read_fds);
-        FD_SET(server_fd_fleck, &read_fds);
-        FD_SET(server_fd_enigma, &read_fds);
-        FD_SET(server_fd_harley, &read_fds);
-
-        int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
-        if (activity < 0) {
-            perror("Error en select");
-            continue;
-        }
-
-        if (FD_ISSET(server_fd_fleck, &read_fds)) {
-            int *client_fd = malloc(sizeof(int) + sizeof(WorkerManager *));
-            *client_fd = accept_connection(server_fd_fleck);
-            if (*client_fd >= 0) {
-                memcpy(client_fd + 1, &manager, sizeof(WorkerManager *));
-                pthread_t thread;
-                pthread_create(&thread, NULL, gestionarConexion, client_fd);
-                pthread_detach(thread);
-            } else {
-                free(client_fd);
-            }
-        }
-
-        if (FD_ISSET(server_fd_enigma, &read_fds)) {
-            int *client_fd = malloc(sizeof(int) + sizeof(WorkerManager *));
-            *client_fd = accept_connection(server_fd_enigma);
-            if (*client_fd >= 0) {
-                memcpy(client_fd + 1, &manager, sizeof(WorkerManager *));
-                pthread_t thread;
-                pthread_create(&thread, NULL, gestionarConexion, client_fd);
-                pthread_detach(thread);
-            } else {
-                free(client_fd);
-            }
-        }
-
-        if (FD_ISSET(server_fd_harley, &read_fds)) {
-            int *client_fd = malloc(sizeof(int) + sizeof(WorkerManager *));
-            *client_fd = accept_connection(server_fd_harley);
-            if (*client_fd >= 0) {
-                memcpy(client_fd + 1, &manager, sizeof(WorkerManager *));
-                pthread_t thread;
-                pthread_create(&thread, NULL, gestionarConexion, client_fd);
-                pthread_detach(thread);
-            } else {
-                free(client_fd);
-            }
-        }
-    }
-
-    freeWorkerManager(manager);
+    logInfo("[INFO]: Conexión cerrada y recursos liberados.");
     return NULL;
 }
 
@@ -377,14 +572,21 @@ void *esperarConexiones(void *arg) {
 *   in: manager = punter al WorkerManager.
 * @Retorn: ----
 ************************************************/
-void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *manager) {
+void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *manager, ClientManager *clientManager) {
     if (!frame) {
         logError("El frame rebut és NULL.");
         return;
     }
 
     // Validar el checksum del frame rebut
-    uint16_t calculated_checksum = calculate_checksum(frame->data, frame->data_length);       
+    uint16_t calculated_checksum;
+
+    if (frame->type == 0x07) {
+        calculated_checksum = calculate_checksum(frame->data, frame->data_length, 1);
+    } else {
+        calculated_checksum = calculate_checksum(frame->data, frame->data_length, 0);
+    }
+   
     if (calculated_checksum != frame->checksum) {
         logError("Trama amb checksum invàlid.");
         return;
@@ -398,50 +600,72 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
 
     switch (frame->type) {
         case 0x01: // CONNECT
-            logInfo("[INFO]: Procesando conexión de Fleck...");
-            
-            // Validar datos recibidos (puedes añadir más validaciones según sea necesario)
-            if (frame->data_length == 0) {
-                logError("[ERROR]: Datos de conexión vacíos.");
+            logInfo("[INFO]: Procesando conexión de Fleck...\n");
+
+            // Parsear los datos de la conexión (nombre de usuario, IP y puerto)
+            char username[64] = {0}, ip[16] = {0};
+            int port = 0;
+
+            if (sscanf(frame->data, "%63[^&]&%15[^&]&%d", username, ip, &port) != 3) {
+                logError("[ERROR]: Formato de datos de conexión inválido.");
                 response.type = 0x01;
                 strncpy(response.data, "CONN_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
-                response.checksum = calculate_checksum(response.data, response.data_length);
+                response.checksum = calculate_checksum(response.data, response.data_length, 0);
                 send_frame(client_fd, &response);
                 break;
             }
 
+            // Registrar al cliente en el ClientManager
+            addClient(clientManager, username, ip, client_fd);
+
+            char log_message[256];
+            snprintf(log_message, sizeof(log_message),
+                    "[DEBUG]: Cliente conectado: Usuario: %s, IP: %s, Puerto: %d, Socket: %d\n",
+                    username, ip, port, client_fd);
+            logInfo(log_message);
+
             // Enviar respuesta de éxito
-            logSuccess("[SUCCESS]: Client connectat correctament.");
             response.type = 0x01;
             strncpy(response.data, "CONN_OK", sizeof(response.data) - 1);
             response.data_length = strlen(response.data);
-            response.checksum = calculate_checksum(response.data, response.data_length);
+            response.checksum = calculate_checksum(response.data, response.data_length, 0);
             send_frame(client_fd, &response);
             break;
 
         case 0x02: // REGISTER
-            logInfo("[DEBUG]: Processant registre de worker...");
+            logInfo("[DEBUG]: Processant registre de worker...\n");
             registrarWorker(frame->data, manager, client_fd);
             listarWorkers(manager);
             break;
 
         case 0x07:
-            handleDisconnectFrame(frame, client_fd, manager);
+            logInfo("[INFO]: Trama de desconexión recibida.");
+
+            // Llamamos a la función centralizada para manejar desconexión
+            handleDisconnectFrame(frame, client_fd, manager, clientManager);
+
+            // Confirmar desconexión al cliente/worker
+            response.type = 0x07;
+            strncpy(response.data, "DISCONNECT_OK", sizeof(response.data) - 1);
+            response.data_length = strlen(response.data);
+            response.checksum = calculate_checksum(response.data, response.data_length, 0);
+            send_frame(client_fd, &response);
+
+            close(client_fd);
             break;
 
         case 0x10: // DISTORT
-            logInfo("[INFO]: Procesando comando DISTORT...");
+            logInfo("[INFO]: Procesando comando DISTORT...\n");
 
             // Parsear el payload recibido: mediaType y fileName
-            char mediaType[10] = {0};
-            char fileName[256] = {0};
+            char mediaType[10], fileName[256];
             if (sscanf(frame->data, "%9[^&]&%255s", mediaType, fileName) != 2) {
                 logError("[ERROR]: Formato de datos incorrecto en comando DISTORT.");
                 response.type = 0x10;
                 strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
-                response.checksum = calculate_checksum(response.data, response.data_length);
+                response.checksum = calculate_checksum(response.data, response.data_length, 0);
                 send_frame(client_fd, &response);
                 break;
             }
@@ -452,61 +676,58 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
                 (strcasecmp(mediaType, "TEXT") == 0 && strcasecmp(fileExtension, ".txt") != 0) ||
                 (strcasecmp(mediaType, "MEDIA") == 0 && strcasecmp(fileExtension, ".wav") != 0 &&
                 strcasecmp(fileExtension, ".png") != 0 && strcasecmp(fileExtension, ".jpg") != 0)) {
-                logError("[ERROR]: Extensión de archivo no válida o no coincide con mediaType.");
+                logError("[ERROR]: Extensión de archivo no válida o no coincide con mediaType.\n");
                 response.type = 0x10;
                 strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
-                response.checksum = calculate_checksum(response.data, response.data_length);
+                response.checksum = calculate_checksum(response.data, response.data_length, 0);
                 send_frame(client_fd, &response);
                 break;
             }
 
             // Buscar worker adecuado
             WorkerInfo *targetWorker = buscarWorker(fileName, manager);
+            if (targetWorker) {
+                logInfo("[DEBUG]: Worker encontrado:");
+                char debug_message[256];
+                snprintf(debug_message, sizeof(debug_message), "IP: %s, Port: %d, FD: %d", targetWorker->ip, targetWorker->port, targetWorker->socket_fd);
+                logInfo(debug_message);
+            }
             if (!targetWorker) {
-                logError("[ERROR]: No se encontró un worker para el archivo especificado.");
-                response.type = 0x10;
-                strncpy(response.data, "DISTORT_KO", sizeof(response.data) - 1);
-                response.data_length = strlen(response.data);
-                response.checksum = calculate_checksum(response.data, response.data_length);
-                send_frame(client_fd, &response);
+                logError("[ERROR]: No se encontró un worker para el archivo especificado.\n");
+                handleWorkerFailure(mediaType, manager, client_fd);
                 break;
             }
 
-            // Construir la respuesta para Fleck con la información del worker
-            char workerInfo[DATA_MAX_SIZE] = {0};
-            snprintf(workerInfo, sizeof(workerInfo), "%s&%d", targetWorker->ip, targetWorker->port);
-            response.type = 0x10; // Tipo DISTORT
-            strncpy(response.data, workerInfo, sizeof(response.data) - 1);
-            response.data_length = strlen(response.data);
-            response.checksum = calculate_checksum(response.data, response.data_length);
 
-            // Enviar la información del worker a Fleck
-            logInfo("[INFO]: Enviando información del worker a Fleck...");
-            send_frame(client_fd, &response);
-            break;
+            // Validar worker antes de usarlo
+            if (targetWorker == NULL || targetWorker->ip[0] == '\0') {
+                logError("[ERROR]: Worker inválido después de buscarWorker.\n");
+                // Intentar reasignación si es posible
+                handleWorkerFailure(mediaType, manager, client_fd);
+                break; // Terminar después de manejar la reasignación
+            }
 
-        case 0x20: // CHECK STATUS
-            logInfo("Processing CHECK STATUS...");
-            response.type = 0x20; // ACK del CHECK STATUS
-            strncpy(response.data, "STATUS_OK", sizeof(response.data) - 1);
+            // Preparar respuesta con la información del Worker
+            snprintf(response.data, sizeof(response.data), "%s&%d", targetWorker->ip, targetWorker->port);
+            response.type = 0x10;
             response.data_length = strlen(response.data);
-            response.checksum = calculate_checksum(response.data, response.data_length);
+            response.checksum = calculate_checksum(response.data, response.data_length, 0);
             send_frame(client_fd, &response);
             break;
 
         case 0x11: //REASINGAR WORKER
-            logInfo("[INFO]: Procesando solicitud de reasignación de Worker...");
+            logInfo("[INFO]: Procesando solicitud de reasignación de Worker...\n");
 
             // Parsear datos: <mediaType>&<FileName>
             char mediaType0x11[10] = {0};
             char fileName0x11[256] = {0};
             if (sscanf(frame->data, "%9[^&]&%255s", mediaType0x11, fileName0x11) != 2) {
-                logError("[ERROR]: Formato inválido en la solicitud de reasignación.");
+                logError("[ERROR]: Formato inválido en la solicitud de reasignación.\n");
                 response.type = 0x11;
                 strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
-                response.checksum = calculate_checksum(response.data, response.data_length);
+                response.checksum = calculate_checksum(response.data, response.data_length, 0);
                 send_frame(client_fd, &response);
                 break;
             }
@@ -519,11 +740,11 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
                 strcasecmp(fileExtension0x11, ".wav") != 0 &&
                 strcasecmp(fileExtension0x11, ".png") != 0 &&
                 strcasecmp(fileExtension0x11, ".jpg") != 0)) {
-                logError("[ERROR]: Extensión de archivo no válida o no coincide con el mediaType.");
+                logError("[ERROR]: Extensión de archivo no válida o no coincide con el mediaType.\n");
                 response.type = 0x11;
                 strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
-                response.checksum = calculate_checksum(response.data, response.data_length);
+                response.checksum = calculate_checksum(response.data, response.data_length, 0);
                 send_frame(client_fd, &response);
                 break;
             }
@@ -531,11 +752,11 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             // Buscar un Worker disponible
             WorkerInfo *targetWorkerCaiguda = buscarWorker(fileName0x11, manager);
             if (!targetWorkerCaiguda) {
-                logError("[ERROR]: No hay Workers disponibles para el tipo especificado.");
+                logError("[ERROR]: No hay Workers disponibles para el tipo especificado.\n");
                 response.type = 0x11;
                 strncpy(response.data, "DISTORT_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
-                response.checksum = calculate_checksum(response.data, response.data_length);
+                response.checksum = calculate_checksum(response.data, response.data_length, 0);
                 send_frame(client_fd, &response);
                 break;
             }
@@ -546,44 +767,75 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             response.type = 0x11;
             strncpy(response.data, workerInfo0x11, sizeof(response.data) - 1);
             response.data_length = strlen(response.data);
-            response.checksum = calculate_checksum(response.data, response.data_length);
+            response.checksum = calculate_checksum(response.data, response.data_length, 0);
 
-            logInfo("[INFO]: Enviando información del Worker reasignado...");
+            logInfo("[INFO]: Enviando información del Worker reasignado...\n");
             send_frame(client_fd, &response);
             break;
 
         default: // Comanda desconeguda
-            logError("Comanda desconeguda rebuda.");
+            logError("Comanda desconeguda rebuda.\n");
             response.type = 0xFF; // ERROR del comandament desconegut
             strncpy(response.data, "CMD_KO", sizeof(response.data) - 1);
             response.data_length = strlen(response.data);
-            response.checksum = calculate_checksum(response.data, response.data_length);
+            response.checksum = calculate_checksum(response.data, response.data_length, 0);
             send_frame(client_fd, &response);
             break;
     }
 }
 
-void handleDisconnectFrame(const Frame *frame, int client_fd, WorkerManager *manager) {
-    if (frame->data_length == 0) {
-        logError("[ERROR]: Desconexión recibida sin datos válidos.");
+void handleDisconnectFrame(const Frame *frame, int client_fd, WorkerManager *manager, ClientManager *clientManager) {
+    if (!frame || !manager || !clientManager) {
+        logError("[ERROR]: Parámetros inválidos en handleDisconnectFrame.");
         return;
     }
 
-    logInfo("[INFO]: Procesando solicitud de desconexión...");
-    if (frame->type == 0x07) {
-        // Desconexión de un Worker
-        if (strstr(frame->data, "TEXT") || strstr(frame->data, "MEDIA")) {
-            if (logoutWorkerBySocket(client_fd, manager) == 0) {
-                logInfo("[INFO]: Worker desconectado correctamente.");
-                listarWorkers(manager);
-            } else {
-                logError("[ERROR]: No se encontró el Worker para desconectar.");
-            }
-        } else { // Desconexión de un Fleck
-            logInfo("[INFO]: Fleck desconectado correctamente.");
+    int isWorker = 0;
+    int isClient = 0;
+
+    // Verificar si es un Worker
+    pthread_mutex_lock(&manager->mutex);
+    for (int i = 0; i < manager->workerCount; i++) {
+        if (manager->workers[i].socket_fd == client_fd) {
+            isWorker = 1;
+            break;
         }
     }
+    pthread_mutex_unlock(&manager->mutex);
+
+    // Verificar si es un Cliente
+    pthread_mutex_lock(&clientManager->mutex);
+    if (!isWorker) {
+        for (int i = 0; i < clientManager->clientCount; i++) {
+            if (clientManager->clients[i].socket_fd == client_fd) {
+                isClient = 1;
+                break;
+            }
+        }
+    }
+    pthread_mutex_unlock(&clientManager->mutex);
+
+    if (isWorker) {
+        logInfo("[INFO]: Identificado como Worker. Procesando desconexión...");
+        if (logoutWorkerBySocket(client_fd, manager) == 0) {
+            logInfo("[INFO]: Worker desconectado correctamente.");
+            reasignarWorkersPrincipales(manager);
+        }
+    } else if (isClient) {
+        logInfo("[INFO]: Identificado como Cliente. Procesando desconexión...");
+        removeClientBySocket(clientManager, client_fd);
+    } else {
+        logWarning("[WARNING]: Socket no corresponde a un Worker ni a un Cliente.");
+    }
+
+    // Mostrar listas actualizadas
+    logInfo("[INFO]: Lista actualizada de Workers:");
+    listarWorkers(manager);
+
+    logInfo("[INFO]: Lista actualizada de Clientes:");
+    listClients(clientManager);
 }
+
 
 void alliberarMemoria(GothamConfig *gothamConfig) {
     if (gothamConfig->ipFleck) free(gothamConfig->ipFleck);
@@ -593,7 +845,7 @@ void alliberarMemoria(GothamConfig *gothamConfig) {
 
 void handleSigint(int sig) {
     (void)sig;
-    logInfo("S'ha rebut SIGINT. Tancant el sistema...");
+    logInfo("S'ha rebut SIGINT. Tancant el sistema...\n");
 
     if (workerManager) {
         pthread_mutex_lock(&workerManager->mutex);
@@ -601,7 +853,7 @@ void handleSigint(int sig) {
         for (int i = 0; i < workerManager->workerCount; i++) {
             WorkerInfo *worker = &workerManager->workers[i];
             Frame closeFrame = {.type = 0xFF, .timestamp = (uint32_t)time(NULL)};
-            closeFrame.checksum = calculate_checksum(closeFrame.data, closeFrame.data_length);
+            closeFrame.checksum = calculate_checksum(closeFrame.data, closeFrame.data_length, 1);
             send_frame(worker->socket_fd, &closeFrame);
             close(worker->socket_fd);
         }
@@ -610,7 +862,7 @@ void handleSigint(int sig) {
         freeWorkerManager(workerManager);
     }
 
-    logSuccess("Sistema tancat correctament.");
+    logSuccess("Sistema tancat correctament.\n");
     exit(0);
 }
 
@@ -618,8 +870,8 @@ void handleSigint(int sig) {
 // Funció principal del servidor Gotham
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        printF(RED "Ús: ./gotham <fitxer de configuració>\n" RESET);
-        return 1;
+        fprintf(stderr, "Uso: ./gotham <archivo de configuración>\n");
+        return EXIT_FAILURE;
     }
 
     mostrarCaratula();
@@ -627,39 +879,103 @@ int main(int argc, char *argv[]) {
 
     GothamConfig *config = malloc(sizeof(GothamConfig));
     if (!config) {
-        logError("Error assignant memòria per a la configuració.");
-        return 1;
+        logError("Error asignando memoria para la configuración.\n");
+        return EXIT_FAILURE;
     }
 
     readConfigFileGeneric(argv[1], config, CONFIG_GOTHAM);
-    logInfo("Configuració carregada correctament.");
+    logInfo("Configuración cargada correctamente.\n");
 
     int server_fd_fleck = startServer(config->ipFleck, config->portFleck);
-    if (server_fd_fleck < 0) {
-        logError("No s'ha pogut iniciar el servidor de Fleck.");
-        free(config);
-        return 1;
-    }
-    logSuccess("Servidor Fleck en funcionament.");
-
     int server_fd_enigma = startServer(config->ipHarEni, config->portHarEni);
-    if (server_fd_enigma < 0) {
-        logError("No s'ha pogut iniciar el servidor de Enigma/Harley.");
-        close(server_fd_fleck);
+    if (server_fd_fleck < 0 || server_fd_enigma < 0) {
+        logError("Error al iniciar los servidores.\n");
         free(config);
-        return 1;
+        return EXIT_FAILURE;
     }
-    logSuccess("Servidor Enigma/Harley en funcionament.");
 
-    int server_fds[3] = {server_fd_fleck, server_fd_enigma, -1};
-    pthread_t thread;
-    pthread_create(&thread, NULL, esperarConexiones, server_fds);
-    pthread_join(thread, NULL);
+    logSuccess("Servidores iniciados correctamente.\n");
 
+    // Crear el WorkerManager compartido
+    WorkerManager *manager = createWorkerManager();
+    ClientManager *clientManager = createClientManager();
+
+    // Bucle principal de aceptación de conexiones
+    while (1) {
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(server_fd_fleck, &read_fds);
+        FD_SET(server_fd_enigma, &read_fds);
+
+        int max_fd = (server_fd_fleck > server_fd_enigma) ? server_fd_fleck : server_fd_enigma;
+
+        logInfo("Esperando conexiones...");
+        int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+        if (activity < 0) {
+            perror("[ERROR]: Error en select");
+            break;
+        }
+
+        // Manejo de conexiones de Fleck (clientes)
+        if (FD_ISSET(server_fd_fleck, &read_fds)) {
+            int client_fd = accept_connection(server_fd_fleck);
+            if (client_fd >= 0) {
+                logInfo("[INFO]: Conexión aceptada desde Fleck.");
+                pthread_t thread;
+                ConnectionArgs *args = malloc(sizeof(ConnectionArgs));
+                if (!args) {
+                    logError("[ERROR]: Error asignando memoria para los argumentos del hilo.");
+                    close(client_fd);
+                    continue;
+                }
+                args->client_fd = client_fd;
+                args->workerManager = manager;
+                args->clientManager = clientManager;
+                
+                if (pthread_create(&thread, NULL, gestionarConexion, args) != 0) {
+                    perror("[ERROR]: Fallo al crear hilo para Fleck");
+                    free(args);
+                    close(client_fd);
+                } else {
+                    pthread_detach(thread);
+                }
+            }
+        }
+
+        // Manejo de conexiones de Harley/Enigma (workers)
+        if (FD_ISSET(server_fd_enigma, &read_fds)) {
+            int client_fd = accept_connection(server_fd_enigma);
+            if (client_fd >= 0) {
+                logInfo("[INFO]: Conexión aceptada desde Harley/Enigma.");
+                pthread_t thread;
+                ConnectionArgs *args = malloc(sizeof(ConnectionArgs));
+                if (!args) {
+                    logError("[ERROR]: Error asignando memoria para los argumentos del hilo.");
+                    close(client_fd);
+                    continue;
+                }
+                args->client_fd = client_fd;
+                args->workerManager = manager;
+                args->clientManager = clientManager;
+
+                if (pthread_create(&thread, NULL, gestionarConexion, args) != 0) {
+                    perror("[ERROR]: Fallo al crear hilo para Harley/Enigma");
+                    free(args);
+                    close(client_fd);
+                } else {
+                    pthread_detach(thread);
+                }
+            }
+        }
+    }
+
+    // Liberar recursos
+    freeWorkerManager(manager);
+    freeClientManager(clientManager);
     close(server_fd_fleck);
     close(server_fd_enigma);
     free(config);
 
-    logInfo("Servidor Gotham tancat correctament.");
-    return 0;
+    logInfo("Servidor Gotham cerrado correctamente.\n");
+    return EXIT_SUCCESS;
 }

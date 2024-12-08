@@ -138,6 +138,8 @@ void readConfigFileGeneric(const char *configFile, void *configStruct, ConfigTyp
 
             line = readUntil(fd, '\n');
             config->portGotham = atoi(line);
+            printf("[DEBUG Config]: Usuario: %s\n", config->user);
+
             free(line);
             break;
         }

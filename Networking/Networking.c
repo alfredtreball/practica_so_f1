@@ -31,7 +31,7 @@ int connect_to_server(const char *ip, int port) {
     }
 
     if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        printF("Error conectando al servidor\n");
+        perror("Error conectando al servidor");
         close(sockfd);
         return -1;
     }
@@ -77,11 +77,6 @@ int startServer(const char *ip, int port) {
         close(server_fd);
         return -1;
     }
-
-    char *msg = NULL;
-    asprintf(&msg, "Servidor escuchando en todas las interfaces en el puerto %d\n", port);
-    printF(msg);
-    free(msg);
 
     return server_fd;
 }

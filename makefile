@@ -6,65 +6,70 @@
 # @Assignatura: Sistemes Operatius
 # @Curs: 2024-2025
 # 
-# @Descripció: Aquest makefile defineix les regles per a la compilació
-# dels diferents executables del projecte, incloent-hi Fleck, Harley,
-# Enigma i Gotham, així com les dependències comunes (FileReader.c, StringUtils.c, etc.),
-# i els nous mòduls (FrameUtils.c).
+# @Descripció: Makefile per a la compilació i execució dels processos
+# distribuïts amb configuracions específiques per màquines.
 ##################################################
 
 # Variables
 CC = gcc
-CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking -IFrameUtils
+CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking -IFrameUtils -ILogging
 
-# Llista de fitxers comuns
-COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c FrameUtils/FrameUtils.c
+# Comunes
+COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c FrameUtils/FrameUtils.c Logging/Logging.c
 
 # Objectius per compilar cada executable
-all: Fleck.exe Fleck1.exe Harley.exe Harley1.exe Enigma.exe Gotham.exe
+all: Fleck_Montserrat.exe Fleck_Matagalls.exe Harley_Montserrat.exe Harley_Matagalls.exe \
+     Harley_Puigpedros.exe Enigma_Puigpedros.exe Gotham_Montserrat.exe
 
-# Compilació de Fleck
-Fleck.exe: Fleck.c $(COMMON)
-	$(CC) $(CFLAGS) Fleck.c $(COMMON) -o Fleck.exe
+# Compilació de Gotham a Montserrat
+Gotham_Montserrat.exe: Gotham.c $(COMMON)
+	$(CC) $(CFLAGS) Gotham.c $(COMMON) -o Gotham_Montserrat.exe
 
-# Compilació de Fleck1 (una còpia per usar config_fleck1.dat)
-Fleck1.exe: Fleck1.c $(COMMON)
-	$(CC) $(CFLAGS) Fleck1.c $(COMMON) -o Fleck1.exe
+# Compilació de Fleck a Montserrat
+Fleck_Montserrat.exe: Fleck.c $(COMMON)
+	$(CC) $(CFLAGS) Fleck.c $(COMMON) -o Fleck_Montserrat.exe
 
-# Compilació de Harley
-Harley.exe: Harley.c $(COMMON)
-	$(CC) $(CFLAGS) Harley.c $(COMMON) -o Harley.exe
+# Compilació de Fleck a Matagalls
+Fleck_Matagalls.exe: Fleck.c $(COMMON)
+	$(CC) $(CFLAGS) Fleck.c $(COMMON) -o Fleck_Matagalls.exe
 
-# Compilació de Harley1
-Harley1.exe: Harley1.c $(COMMON)
-	$(CC) $(CFLAGS) Harley1.c $(COMMON) -o Harley1.exe
+# Compilació de Harley a Montserrat
+Harley_Montserrat.exe: Harley.c $(COMMON)
+	$(CC) $(CFLAGS) Harley.c $(COMMON) -o Harley_Montserrat.exe
 
-# Compilació de Enigma
-Enigma.exe: Enigma.c $(COMMON)
-	$(CC) $(CFLAGS) Enigma.c $(COMMON) -o Enigma.exe
+# Compilació de Harley a Matagalls
+Harley_Matagalls.exe: Harley.c $(COMMON)
+	$(CC) $(CFLAGS) Harley.c $(COMMON) -o Harley_Matagalls.exe
 
-# Compilació de Gotham
-Gotham.exe: Gotham.c $(COMMON)
-	$(CC) $(CFLAGS) Gotham.c $(COMMON) -o Gotham.exe
+# Compilació de Harley a Puigpedros
+Harley_Puigpedros.exe: Harley.c $(COMMON)
+	$(CC) $(CFLAGS) Harley.c $(COMMON) -o Harley_Puigpedros.exe
+
+# Compilació de Enigma a Puigpedros
+Enigma_Puigpedros.exe: Enigma.c $(COMMON)
+	$(CC) $(CFLAGS) Enigma.c $(COMMON) -o Enigma_Puigpedros.exe
 
 # Regles per executar automàticament cada programa amb el fitxer de configuració corresponent
-Fleck: Fleck.exe
-	./Fleck.exe fitxers_configuració/config_fleck.dat
+gm: Gotham_Montserrat.exe
+	./Gotham_Montserrat.exe fitxers_configuració/config_gotham.dat
 
-Fleck1: Fleck1.exe
-	./Fleck1.exe fitxers_configuració/config_fleck1.dat
+fm: Fleck_Montserrat.exe
+	./Fleck_Montserrat.exe fitxers_configuració/config_fleck.dat
 
-Harley: Harley.exe
-	./Harley.exe fitxers_configuració/config_harley.dat
+fma: Fleck_Matagalls.exe
+	./Fleck_Matagalls.exe fitxers_configuració/config_fleck1.dat
 
-Harley1: Harley1.exe
-	./Harley1.exe fitxers_configuració/config_harley1.dat
+hm: Harley_Montserrat.exe
+	./Harley_Montserrat.exe fitxers_configuració/config_harley.dat
 
+hma: Harley_Matagalls.exe
+	./Harley_Matagalls.exe fitxers_configuració/config_harley1.dat
 
-Enigma: Enigma.exe
-	./Enigma.exe fitxers_configuració/config_enigma.dat
+hpp: Harley_Puigpedros.exe
+	./Harley_Puigpedros.exe fitxers_configuració/config_harley_pp.dat
 
-Gotham: Gotham.exe
-	./Gotham.exe fitxers_configuració/config_gotham.dat
+ep: Enigma_Puigpedros.exe
+	./Enigma_Puigpedros.exe fitxers_configuració/config_enigma.dat
 
 # Neteja els fitxers generats
 clean:

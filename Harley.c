@@ -14,54 +14,33 @@
 #include "StringUtils/StringUtils.h"
 #include "Networking/Networking.h"
 #include "FrameUtils/FrameUtils.h"
+#include "Logging/Logging.h"
 
-void logInfo(const char *msg);
-void logError(const char *msg);
-void logSuccess(const char *msg);
 void *handleFleckFrames(void *arg);
 void processReceivedFrameFromFleck(int clientSocket, const Frame *request);
 void processReceivedFrame(int gothamSocket, const Frame *response);
-
-// Funcions de registre de logs
-void logInfo(const char *msg) {
-    printF(CYAN "[INFO]: " RESET);
-    printF(msg);
-    printF("\n");
-}
-
-void logError(const char *msg) {
-    printF(RED "[ERROR]: " RESET);
-    printF(msg);
-    printF("\n");
-}
-
-void logSuccess(const char *msg) {
-    printF(GREEN "[SUCCESS]: " RESET);
-    printF(msg);
-    printF("\n");
-}
 
 // Variable global para el socket
 int gothamSocket = -1;
 
 void sendDisconnectFrameToGotham(const char *mediaType) {
     Frame frame = {0};
-    frame.type = 0x07;
+    frame.type = 0x07; // Tipo de desconexión
     strncpy(frame.data, mediaType, sizeof(frame.data) - 1);
     frame.data_length = strlen(frame.data);
     frame.timestamp = (uint32_t)time(NULL);
-    frame.checksum = calculate_checksum(frame.data, frame.data_length);
+    frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
-    logInfo("[INFO]: Notificando desconexión a Gotham...");
+    logInfo("[INFO]: Enviando trama de desconexión a Gotham...");
     send_frame(gothamSocket, &frame);
 }
 
 // Función para manejar señales como SIGINT
 void signalHandler(int sig) {
     if (sig == SIGINT) {
-        printF(ANSI_COLOR_YELLOW "[INFO]: Desconnectant de Gotham...\n" ANSI_COLOR_RESET);
+        logInfo("[INFO]: Desconectando de Gotham...");
         if (gothamSocket >= 0) {
-            sendDisconnectFrameToGotham("MEDIA");
+            sendDisconnectFrameToGotham("MEDIA"); // Envía desconexión para tipo MEDIA
             close(gothamSocket);
         }
         exit(0);
@@ -92,31 +71,24 @@ void *handleFleckFrames(void *arg) {
     int clientSocket = *(int *)arg;
 
     Frame request;
-    while (receive_frame(clientSocket, &request) == 0) {
-        processReceivedFrameFromFleck(clientSocket, &request);
+    while (1) { // Mantener el bucle activo
+        if (receive_frame(clientSocket, &request) == 0) {
+            logInfo("[INFO]: Frame recibido de Fleck.");
+            processReceivedFrameFromFleck(clientSocket, &request);
+        } else {
+            logWarning("[WARNING]: Conexión cerrada por Fleck o error en receive_frame.");
+            break; // Salir del bucle si la conexión es cerrada por el cliente
+        }
     }
 
+    logInfo("[INFO]: Cerrando conexión del cliente Fleck.");
     close(clientSocket);
     return NULL;
 }
 
+
 void sendDistortedFileToFleck(int clientSocket, const char *originalFileContent, size_t originalFileSize) {
-    // Placeholder para MD5SUM y tamaño del archivo distorsionado
-    char md5Sum[33] = "PLACEHOLDER_MD5";
-    char fileSize[20];
-    snprintf(fileSize, sizeof(fileSize), "%zu", originalFileSize); // Usamos el tamaño original como ejemplo
-
-    // Enviar la trama de información del archivo (0x04)
-    Frame initFrame = {0};
-    initFrame.type = 0x04;
-    snprintf(initFrame.data, sizeof(initFrame.data), "%s&%s", fileSize, md5Sum);
-    initFrame.data_length = strlen(initFrame.data);
-    initFrame.timestamp = (uint32_t)time(NULL);
-    initFrame.checksum = calculate_checksum(initFrame.data, initFrame.data_length);
-
-    logInfo("[INFO]: Enviando información del archivo distorsionado (0x04)...");
-    send_frame(clientSocket, &initFrame);
-
+    logInfo("Procesando el archivo distrosionado");
     // Enviar los datos del archivo en tramas (0x05)
     size_t offset = 0;
     while (offset < originalFileSize) {
@@ -128,19 +100,18 @@ void sendDistortedFileToFleck(int clientSocket, const char *originalFileContent,
 
         dataFrame.data_length = chunkSize;
         dataFrame.timestamp = (uint32_t)time(NULL);
-        dataFrame.checksum = calculate_checksum(dataFrame.data, dataFrame.data_length);
+        dataFrame.checksum = calculate_checksum(dataFrame.data, dataFrame.data_length, 0);
 
         send_frame(clientSocket, &dataFrame);
         offset += chunkSize;
     }
 
-    logInfo("[INFO]: Archivo distorsionado enviado. Esperando validación...");
+    logInfo("[INFO]: Todos los fragmentos del archivo distorsionado enviados.");
     // Simulación de verificación del MD5SUM
     int md5Valid = 1; // Cambiar a 0 para simular fallo en validación
-
-    // Enviar la trama de validación (0x06)
     Frame validationFrame = {0};
     validationFrame.type = 0x06;
+
     if (md5Valid) {
         strncpy(validationFrame.data, "CHECK_OK", sizeof(validationFrame.data) - 1);
     } else {
@@ -148,36 +119,60 @@ void sendDistortedFileToFleck(int clientSocket, const char *originalFileContent,
     }
     validationFrame.data_length = strlen(validationFrame.data);
     validationFrame.timestamp = (uint32_t)time(NULL);
-    validationFrame.checksum = calculate_checksum(validationFrame.data, validationFrame.data_length);
+    validationFrame.checksum = calculate_checksum(validationFrame.data, validationFrame.data_length, 0);
 
     logInfo("[INFO]: Enviando resultado de validación de MD5SUM...");
     send_frame(clientSocket, &validationFrame);
+
+    logInfo("[INFO]: Resultado de validación del MD5SUM enviado.");
 }
 
 void receiveFileFromFleck(int clientSocket, char **fileContent, size_t *fileSize) {
     logInfo("[INFO]: Recibiendo archivo desde Fleck...");
+
+    Frame request;
+    if (receive_frame(clientSocket, &request) != 0 || request.type != 0x04) {
+        logError("[ERROR]: Trama inicial 0x04 no recibida o inválida.");
+        return;
+    }
+
+    // Mostrar los valores recibidos de FileSize y MD5SUM
+    logInfo("[INFO]: Trama 0x04 recibida.");
+    logInfo("[INFO]: Datos recibidos:");
+    logInfo(request.data);
+
+    // Preparar buffer para recibir datos
     size_t bufferCapacity = 1024;
     size_t currentSize = 0;
     char *buffer = malloc(bufferCapacity);
     if (!buffer) {
-        logError("[ERROR]: No se pudo asignar memoria para recibir el archivo.");
+        logError("[ERROR]: No se pudo asignar memoria para el archivo.");
         return;
     }
 
-    Frame request;
-    while (receive_frame(clientSocket, &request) == 0) {
-        if (request.type == 0x05) {
-            if (currentSize + request.data_length > bufferCapacity) {
-                bufferCapacity *= 2;
-                buffer = realloc(buffer, bufferCapacity);
-                if (!buffer) {
-                    logError("[ERROR]: No se pudo reasignar memoria para recibir el archivo.");
-                    return;
+    // Recibir tramas 0x05 con datos
+    while (1) {
+        if (receive_frame(clientSocket, &request) == 0) {
+            if (request.type == 0x05) { // Datos del archivo
+                if (currentSize + request.data_length > bufferCapacity) {
+                    bufferCapacity *= 2;
+                    buffer = realloc(buffer, bufferCapacity);
+                    if (!buffer) {
+                        logError("[ERROR]: No se pudo reasignar memoria para el archivo.");
+                        return;
+                    }
                 }
+                memcpy(buffer + currentSize, request.data, request.data_length);
+                currentSize += request.data_length;
+            } else if (request.type == 0x06) { // Trama de validación
+                logInfo("[INFO]: Trama de validación (0x06) recibida.");
+                break;
+            } else {
+                logWarning("[WARNING]: Tipo de trama inesperado recibido.");
+                break;
             }
-            memcpy(buffer + currentSize, request.data, request.data_length);
-            currentSize += request.data_length;
         } else {
+            logError("[ERROR]: Error al recibir archivo desde Fleck.");
             break;
         }
     }
@@ -188,10 +183,13 @@ void receiveFileFromFleck(int clientSocket, char **fileContent, size_t *fileSize
 }
 
 void processReceivedFrameFromFleck(int clientSocket, const Frame *request) {
-    if (!request) return;
+    if (!request) {
+        logError("[ERROR]: Frame recibido nulo.");
+        return;
+    }
 
     switch (request->type) {
-        case 0x03: {
+        case 0x03: { // Solicitud DISTORT FILE
             logInfo("[INFO]: Solicitud DISTORT FILE recibida.");
             char userName[64], fileName[256], fileSize[20], md5Sum[33], factor[20];
             if (sscanf(request->data, "%63[^&]&%255[^&]&%19[^&]&%32[^&]&%19s",
@@ -200,39 +198,38 @@ void processReceivedFrameFromFleck(int clientSocket, const Frame *request) {
                 Frame errorFrame = {.type = 0x03, .timestamp = time(NULL)};
                 strncpy(errorFrame.data, "CON_KO", sizeof(errorFrame.data) - 1);
                 errorFrame.data_length = strlen(errorFrame.data);
-                errorFrame.checksum = calculate_checksum(errorFrame.data, errorFrame.data_length);
+                errorFrame.checksum = calculate_checksum(errorFrame.data, errorFrame.data_length, 0);
                 send_frame(clientSocket, &errorFrame);
                 return;
             }
 
-            logInfo("[INFO]: Recibiendo archivo...");
-            char *receivedFileContent = NULL;
-            size_t receivedFileSize = 0;
+            // Confirmar recepción con CON_OK
+            Frame okFrame = {.type = 0x03, .timestamp = time(NULL)};
+            strncpy(okFrame.data, "CON_OK", sizeof(okFrame.data) - 1);
+            okFrame.data_length = strlen(okFrame.data);
+            okFrame.checksum = calculate_checksum(okFrame.data, okFrame.data_length, 0);
+            send_frame(clientSocket, &okFrame);
+            logInfo("[INFO]: Enviada confirmación CON_OK a Fleck.");
 
-            receiveFileFromFleck(clientSocket, &receivedFileContent, &receivedFileSize);
+            // Esperar trama 0x04
+            char *fileContent = NULL;
+            size_t numericFileSize = 0;
 
-            logInfo("[INFO]: Simulando distorsión del archivo...");
-            // Aquí se simula una transformación, como duplicar los datos
-            char *distortedFileContent = malloc(receivedFileSize);
-            if (!distortedFileContent) {
-                logError("[ERROR]: No se pudo asignar memoria para el archivo distorsionado.");
-                free(receivedFileContent);
+            receiveFileFromFleck(clientSocket, &fileContent, &numericFileSize);
+
+            if (!fileContent || numericFileSize == 0) {
+                logError("[ERROR]: No se recibió archivo válido desde Fleck.");
                 return;
             }
 
-            for (size_t i = 0; i < receivedFileSize; i++) {
-                distortedFileContent[i] = receivedFileContent[i]; // Placeholder para distorsión
-            }
-
-            // Enviar el archivo distorsionado
-            sendDistortedFileToFleck(clientSocket, distortedFileContent, receivedFileSize);
-
-            free(receivedFileContent);
-            free(distortedFileContent);
+            logInfo("[INFO]: Archivo recibido correctamente. Procesando...");
+            // Aquí procesar el archivo
+            sendDistortedFileToFleck(clientSocket, fileContent, numericFileSize);
+            free(fileContent);
             break;
         }
         default:
-            logError("[ERROR]: Comando desconocido recibido desde Fleck.");
+            logWarning("[WARNING]: Frame desconocido recibido.");
             break;
     }
 }
@@ -243,12 +240,16 @@ void processReceivedFrame(int gothamSocket, const Frame *response) {
 
     // Manejo de comandos
     switch (response->type) {
+        case 0x08:
+            logInfo("[INFO]: Trama 0x08 recibida. Promovido a Worker principal.");
+            break;
+
         case 0x10: // DISTORT
             printColor(ANSI_COLOR_CYAN, "[INFO]: Procesando comando DISTORT...");
             Frame frame = { .type = 0x10, .timestamp = time(NULL) };
             strncpy(frame.data, "DISTORT_OK", sizeof(frame.data) - 1);
             frame.data_length = strlen(frame.data);
-            frame.checksum = calculate_checksum(frame.data, frame.data_length);
+            frame.checksum = calculate_checksum(frame.data, frame.data_length, 0);
 
             send_frame(gothamSocket, &frame);
             printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Respuesta DISTORT_OK enviada.");
@@ -259,7 +260,7 @@ void processReceivedFrame(int gothamSocket, const Frame *response) {
             Frame errorFrame = { .type = 0xFF, .timestamp = time(NULL) };
             strncpy(errorFrame.data, "CMD_KO", sizeof(errorFrame.data) - 1);
             errorFrame.data_length = strlen(errorFrame.data);
-            errorFrame.checksum = calculate_checksum(errorFrame.data, errorFrame.data_length);
+            errorFrame.checksum = calculate_checksum(errorFrame.data, errorFrame.data_length, 0);
 
             send_frame(gothamSocket, &errorFrame);
             break;
@@ -282,6 +283,7 @@ int main(int argc, char *argv[]) {
     }
 
     readConfigFileGeneric(argv[1], harleyConfig, CONFIG_HARLEY);
+    printf("[DEBUG]: Configuración cargada: IP=%s, PUERTO=%d", harleyConfig->ipFleck, harleyConfig->portFleck);
 
     if (!harleyConfig->workerType || !harleyConfig->ipFleck || harleyConfig->portFleck <= 0) {
         printColor(ANSI_COLOR_RED, "[ERROR]: Configuración de Harley incorrecta o incompleta.");
@@ -305,7 +307,7 @@ int main(int argc, char *argv[]) {
     snprintf(frame.data, sizeof(frame.data), "%s&%s&%d",
              harleyConfig->workerType, harleyConfig->ipFleck, harleyConfig->portFleck);
     frame.data_length = strlen(frame.data);
-    frame.checksum = calculate_checksum(frame.data, frame.data_length);
+    frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
     if (send_frame(gothamSocket, &frame) < 0) {
         printColor(ANSI_COLOR_RED, "[ERROR]: Error enviando el registro a Gotham.");
@@ -347,18 +349,25 @@ int main(int argc, char *argv[]) {
     }
     pthread_detach(gothamThread);
 
-    // Inicia el servidor local para Fleck
+
     int fleckSocket = startServer(harleyConfig->ipFleck, harleyConfig->portFleck);
     if (fleckSocket < 0) {
         printColor(ANSI_COLOR_RED, "[ERROR]: No se pudo iniciar el servidor local de Harley.");
         free(harleyConfig);
         return 1;
     }
+    printf("Servidor Harley iniciado en IP: %s, Puerto: %d\n", harleyConfig->ipFleck, harleyConfig->portFleck);
     printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Servidor local de Harley iniciado correctamente.");
 
     // Bucle para manejar conexiones de Fleck
     while (1) {
         int clientSocket = accept_connection(fleckSocket);
+
+        if (clientSocket < 0) {
+            logError("[ERROR]: No se pudo aceptar la conexión del Fleck.");
+            continue;
+        }
+
         if (clientSocket >= 0) {
             pthread_t fleckThread;
             pthread_create(&fleckThread, NULL, (void *(*)(void *))handleFleckFrames, &clientSocket);

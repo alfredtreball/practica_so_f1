@@ -16,11 +16,13 @@
 #include "DataConversion/DataConversion.h"
 #include "Networking/Networking.h"
 #include "FrameUtils/FrameUtils.h"
+#include "Logging/Logging.h"
 
 #define FRAME_SIZE 256
 #define CHECKSUM_MODULO 65536
 
 int gothamSocket = -1; // Variable global para manejar el socket
+int workerSocket = -1;
 
 void signalHandler(int sig);
 void processCommandWithGotham(const char *command);
@@ -29,7 +31,11 @@ void listMedia(const char *directory);
 void processDistortFileCommand(const char *fileName, const char *factor, int gothamSocket);
 void alliberarMemoria(FleckConfig *fleckConfig);
 void handleWorkerFailure(const char *mediaType, const char *fileName, int gothamSocket);
-
+void sendFileToWorker(int workerSocket, const char *fileName);
+void receiveDistortedFileFromWorker(int workerSocket);
+void sendDisconnectFrameToGotham(const char *userName);
+void sendDisconnectFrameToWorker(int workerSocket, const char *userName);
+void processCommand(char *command, int gothamSocket, int workerSocket);
 
 FleckConfig *globalFleckConfig = NULL;
 
@@ -37,31 +43,6 @@ void printColor(const char *color, const char *message) {
     write(1, color, strlen(color));
     write(1, message, strlen(message));
     write(1, ANSI_COLOR_RESET, strlen(ANSI_COLOR_RESET));
-}
-
-// Funcions de registre de logs
-void logInfo(const char *msg) {
-    printF(CYAN "[INFO]: " RESET);
-    printF(msg);
-    printF("\n");
-}
-
-void logWarning(const char *msg) {
-    printF(YELLOW "[WARNING]: " RESET);
-    printF(msg);
-    printF("\n");
-}
-
-void logError(const char *msg) {
-    printF(RED "[ERROR]: " RESET);
-    printF(msg);
-    printF("\n");
-}
-
-void logSuccess(const char *msg) {
-    printF(GREEN "[SUCCESS]: " RESET);
-    printF(msg);
-    printF("\n");
 }
 
 // Función para listar los archivos de texto (.txt) en el directorio especificado
@@ -203,11 +184,18 @@ void processCommandWithGotham(const char *command) {
             return;
         }
 
+        // Eliminar cualquier carácter no deseado de `user`
+        removeChar(globalFleckConfig->user, '\r');
+        removeChar(globalFleckConfig->user, '\n');
+
         frame.type = 0x01; // Tipo de conexión
         frame.timestamp = (uint32_t)time(NULL);
-        strncpy(frame.data, "CONNECT", sizeof(frame.data) - 1);
+
+        // Construir la trama con el formato <userName>&<IP>&<Port>
+        snprintf(frame.data, sizeof(frame.data), "%s&%s&%d",
+                 globalFleckConfig->user, globalFleckConfig->ipGotham, globalFleckConfig->portGotham);
         frame.data_length = strlen(frame.data);
-        frame.checksum = calculate_checksum(frame.data, frame.data_length);
+        frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
         char buffer[FRAME_SIZE];
         serialize_frame(&frame, buffer);
@@ -235,9 +223,9 @@ void processCommandWithGotham(const char *command) {
         }
 
         // Validar checksum de la respuesta
-        uint16_t resp_checksum = calculate_checksum(response.data, response.data_length);
+        uint16_t resp_checksum = calculate_checksum(response.data, response.data_length, 1);
         if (resp_checksum != response.checksum) {
-            printColor(ANSI_COLOR_RED, "[ERROR]: Resposta de Gotham amb checksum invàlid\n");
+            printColor(ANSI_COLOR_RED, "[ERROR]: Respuesta de Gotham con checksum inválido\n");
             return;
         }
 
@@ -258,7 +246,7 @@ void processCommandWithGotham(const char *command) {
     printColor(ANSI_COLOR_RED, "[ERROR]: Comando CONNECT no válido en este contexto.\n");
 }
 
-void processCommand(char *command, int gothamSocket) {
+void processCommand(char *command, int gothamSocket, int workerSocket) {
     if (command == NULL || strlen(command) == 0 || strcmp(command, "\n") == 0) {
         printColor(ANSI_COLOR_RED, "[ERROR]: Empty command.\n");
         return;
@@ -290,36 +278,140 @@ void processCommand(char *command, int gothamSocket) {
         // Implementaremos en FASE 3
         printColor(ANSI_COLOR_GREEN, "[SUCCESS]: All local data has been cleared in Fleck.\n");
     } else if (strcasecmp(cmd, "LOGOUT") == 0 && subCmd == NULL) {
-        if (gothamSocket != -1) {
-            printColor(ANSI_COLOR_YELLOW, "[INFO]: Desconectando de Gotham...\n");
+        logInfo("[INFO]: Procesando comando LOGOUT...");
+
+        if (gothamSocket >= 0) {
+            sendDisconnectFrameToGotham(globalFleckConfig->user);
             close(gothamSocket);
             gothamSocket = -1;
-            printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Desconectado exitosamente.\n");
+            logInfo("[INFO]: Desconexión de Gotham completada.");
         } else {
-            printColor(ANSI_COLOR_RED, "[ERROR]: No estás conectado a Gotham.\n");
+            logWarning("[WARNING]: No estás conectado a Gotham.");
+        }
+
+        if (workerSocket >= 0) {
+            sendDisconnectFrameToWorker(workerSocket, globalFleckConfig->user);
+            close(workerSocket);
+            workerSocket = -1;
+            logInfo("[INFO]: Desconexión del Worker completada.");
+        } else {
+            logWarning("[WARNING]: No estás conectado a un Worker.");
         }
     } else if (strcasecmp(cmd, "DISTORT") == 0) {
         if (gothamSocket == -1) {
             printColor(ANSI_COLOR_RED, "[ERROR]: Debes conectarte a Gotham antes de ejecutar DISTORT.\n");
         } else {
-            char debugLog[256];
-            snprintf(debugLog, sizeof(debugLog), "[DEBUG]: subCmd: '%s', extra: '%s'", subCmd ? subCmd : "NULL", extra ? extra : "NULL");
-            logInfo(debugLog);
             processDistortFileCommand(subCmd, extra, gothamSocket);
         }
     } else if (strcasecmp(cmd, "CHECK") == 0 && strcasecmp(subCmd, "STATUS") == 0 && extra == NULL) {
-        if (gothamSocket == -1) {
-            printColor(ANSI_COLOR_RED, "[ERROR]: Debes conectarte a Gotham antes de ejecutar CHECK STATUS.\n");
-        } else {
-            printColor(ANSI_COLOR_CYAN, "[INFO]: Checking status...\n");
-            processCommandWithGotham("CHECK STATUS");
-        }
+            printColor(ANSI_COLOR_CYAN, "[INFO]: Verificando el estado de los archivos...\n");
+            // Aquí puedes implementar lógica adicional para verificar el estado local
+            logInfo("[INFO]: Estado de los archivos verificado localmente.");
     } else {
         printColor(ANSI_COLOR_RED, "[ERROR]: Unknown command. Please enter a valid command.\n");
     }
 }
 
+void sendDistortFileRequest(int workerSocket, const char *userName, const char *fileName, const char *fileSize, const char *md5Sum, const char *factor) {
+    Frame frame = {0};
+    frame.type = 0x03; // Trama de solicitud de distorsión
+    snprintf(frame.data, sizeof(frame.data), "%s&%s&%s&%s&%s", userName, fileName, fileSize, md5Sum, factor);
+    frame.data_length = strlen(frame.data);
+    frame.timestamp = (uint32_t)time(NULL);
+    frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
+
+    logInfo("[INFO]: Enviando solicitud DISTORT FILE al Worker...");
+    send_frame(workerSocket, &frame);
+
+    // Esperar confirmación del Worker
+    Frame response;
+    if (receive_frame(workerSocket, &response) == 0 && response.type == 0x03 && strcmp(response.data, "CON_OK") == 0) {
+        logSuccess("[SUCCESS]: Worker listo para recibir archivo.");
+    } else {
+        logError("[ERROR]: Worker rechazó la solicitud DISTORT FILE.");
+        return;
+    }
+
+    // Enviar el archivo en fragmentos (0x05)
+    sendFileToWorker(workerSocket, fileName);
+}
+
+void processDistortedFileFromWorker(int workerSocket) {
+    logInfo("[INFO]: Iniciando recepción del archivo distorsionado...");
+
+    Frame response;
+
+    // Esperar información del archivo distorsionado (0x04)
+    if (receive_frame(workerSocket, &response) == 0) {
+        if (response.type == 0x04) {
+            char fileSize[20], md5Sum[33];
+            if (sscanf(response.data, "%19[^&]&%32s", fileSize, md5Sum) == 2) {
+                logInfo("[INFO]: Trama 0x04 recibida. Tamaño y MD5 del archivo procesados correctamente.");
+            } else {
+                logError("[ERROR]: Formato inválido en la trama 0x04.");
+                return;
+            }
+        } else {
+            logError("[ERROR]: Trama no esperada (se esperaba 0x04).");
+            return;
+        }
+    } else {
+        logError("[ERROR]: Fallo al recibir trama 0x04 del Worker.");
+        return;
+    }
+
+    // Recibir fragmentos del archivo distorsionado (0x05)
+    logInfo("[INFO]: Esperando tramas 0x05...");
+    receiveDistortedFileFromWorker(workerSocket);
+
+    // Esperar validación del MD5SUM (0x06)
+    logInfo("[INFO]: Esperando trama de validación 0x06...");
+    if (receive_frame(workerSocket, &response) == 0) {
+        if (response.type == 0x06) {
+            if (strcmp(response.data, "CHECK_OK") == 0) {
+                logSuccess("[SUCCESS]: Validación de archivo exitosa (CHECK_OK).");
+            } else {
+                logError("[ERROR]: Validación del MD5 fallida (CHECK_KO).");
+            }
+        } else {
+            logError("[ERROR]: Trama no esperada (se esperaba 0x06).");
+        }
+    } else {
+        logError("[ERROR]: Fallo al recibir trama 0x06 del Worker.");
+    }
+
+    // Verificar si la conexión se cierra correctamente después del flujo
+    logInfo("[INFO]: Verificando cierre controlado de conexión...");
+    char testBuffer[256];
+    ssize_t bytesRead = read(workerSocket, testBuffer, sizeof(testBuffer));
+    if (bytesRead == 0) {
+        logInfo("[INFO]: Conexión cerrada correctamente por el Worker.");
+    } else if (bytesRead < 0) {
+        logError("[ERROR]: Error inesperado al leer después de la trama 0x06.");
+    } else {
+        logWarning("[WARNING]: Se recibieron datos inesperados después de 0x06.");
+    }
+
+    logInfo("[INFO]: Finalizando proceso del archivo distorsionado. Cerrando conexión.");
+    close(workerSocket);
+}
+
 void sendFileToWorker(int workerSocket, const char *fileName) {
+    // Usamos valores estáticos para FileSize y MD5SUM
+    char fileSize[] = "12345";  // Placeholder
+    char md5Sum[] = "abcdef1234567890abcdef1234567890";  // Placeholder
+
+    // Enviar trama 0x04 con tamaño y MD5
+    Frame infoFrame = {0};
+    infoFrame.type = 0x04;
+    snprintf(infoFrame.data, sizeof(infoFrame.data), "%s&%s", fileSize, md5Sum);
+    infoFrame.data_length = strlen(infoFrame.data);
+    infoFrame.timestamp = (uint32_t)time(NULL);
+    infoFrame.checksum = calculate_checksum(infoFrame.data, infoFrame.data_length, 1);
+    send_frame(workerSocket, &infoFrame);
+    logInfo("[INFO]: Trama 0x04 enviada con FileSize y MD5.");
+
+    // Enviar los datos del archivo en tramas 0x05
     int fileFd = open(fileName, O_RDONLY);
     if (fileFd < 0) {
         logError("[ERROR]: No se pudo abrir el archivo para enviar.");
@@ -328,7 +420,6 @@ void sendFileToWorker(int workerSocket, const char *fileName) {
 
     char buffer[256];
     ssize_t bytesRead;
-
     Frame dataFrame = {0};
     dataFrame.type = 0x05;
 
@@ -337,17 +428,31 @@ void sendFileToWorker(int workerSocket, const char *fileName) {
         memcpy(dataFrame.data, buffer, bytesRead);
         dataFrame.data_length = bytesRead;
         dataFrame.timestamp = (uint32_t)time(NULL);
-        dataFrame.checksum = calculate_checksum(dataFrame.data, dataFrame.data_length);
-
+        dataFrame.checksum = calculate_checksum(dataFrame.data, dataFrame.data_length, 1);
         send_frame(workerSocket, &dataFrame);
     }
 
     close(fileFd);
-    logInfo("[INFO]: Archivo enviado al Worker.");
+
+    // Esperar validación 0x06
+    Frame validationFrame;
+    if (receive_frame(workerSocket, &validationFrame) == 0) {
+        if (validationFrame.type == 0x06) {
+            if (strcmp(validationFrame.data, "CHECK_OK") == 0) {
+                logSuccess("[SUCCESS]: Archivo enviado y validado correctamente.");
+            } else {
+                logError("[ERROR]: Validación del archivo fallida.");
+            }
+        } else {
+            logError("[ERROR]: Trama inesperada después de enviar el archivo.");
+        }
+    } else {
+        logError("[ERROR]: Error al recibir validación del Worker.");
+    }
 }
 
 void receiveDistortedFileFromWorker(int workerSocket) {
-    char filePath[] = "distorted_file"; // Guardaremos el archivo aquí
+    char filePath[] = "distorted_file"; // Guardaremos el archivo distorsionado aquí
     int fileFd = open(filePath, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fileFd < 0) {
         logError("[ERROR]: No se pudo crear el archivo distorsionado.");
@@ -356,31 +461,24 @@ void receiveDistortedFileFromWorker(int workerSocket) {
 
     Frame response;
     while (receive_frame(workerSocket, &response) == 0) {
-        if (response.type == 0x04) {
-            logInfo("[INFO]: Información del archivo distorsionado recibida.");
-            char fileSize[20], md5Sum[33];
-            if (sscanf(response.data, "%19[^&]&%32s", fileSize, md5Sum) != 2) {
-                logError("[ERROR]: Formato inválido en información del archivo.");
-                close(fileFd);
-                return;
-            }
-
-            logInfo("[INFO]: Tamaño y MD5 del archivo registrado.");
-        } else if (response.type == 0x05) {
-            logInfo("[INFO]: Recibiendo fragmento de archivo...");
+        if (response.type == 0x05) { // Esperar fragmentos distorsionados
+            logInfo("[INFO]: Recibiendo fragmento de archivo distorsionado...");
             write(fileFd, response.data, response.data_length);
-        } else if (response.type == 0x06) {
+        } else if (response.type == 0x06) { // Validación de MD5SUM
+            logInfo("[INFO]: Recibida validación del MD5SUM.");
             if (strcmp(response.data, "CHECK_OK") == 0) {
-                logSuccess("[SUCCESS]: Archivo validado correctamente.");
+                logSuccess("[SUCCESS]: MD5SUM validado correctamente.");
             } else {
-                logError("[ERROR]: MD5SUM no coincide.");
+                logError("[ERROR]: MD5SUM del archivo distorsionado no coincide.");
             }
-            break;
+            break; // Finalizar recepción después de la validación
         }
     }
 
     close(fileFd);
+    logInfo("[INFO]: Archivo distorsionado recibido y procesado.");
 }
+
 
 void handleWorkerFailure(const char *mediaType, const char *fileName, int gothamSocket) {
     Frame frame = {0};
@@ -388,7 +486,7 @@ void handleWorkerFailure(const char *mediaType, const char *fileName, int gotham
     snprintf(frame.data, sizeof(frame.data), "%s&%s", mediaType, fileName);
     frame.data_length = strlen(frame.data);
     frame.timestamp = (uint32_t)time(NULL);
-    frame.checksum = calculate_checksum(frame.data, frame.data_length);
+    frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
     logInfo("[INFO]: Enviando solicitud de reasignación de Worker a Gotham...");
     send_frame(gothamSocket, &frame);
@@ -406,6 +504,7 @@ void handleWorkerFailure(const char *mediaType, const char *fileName, int gotham
                 int workerPort;
                 if (sscanf(response.data, "%15[^&]&%d", workerIp, &workerPort) == 2) {
                     logInfo("[INFO]: Nuevo Worker asignado. Intentando reconexión...");
+                
                     int workerSocket = connect_to_server(workerIp, workerPort);
                     if (workerSocket >= 0) {
                         logSuccess("[SUCCESS]: Conexión al nuevo Worker establecida.");
@@ -459,7 +558,7 @@ void processDistortFileCommand(const char *fileName, const char *factor, int got
     snprintf(frame.data, sizeof(frame.data), "%s&%s", mediaType, fileName);
     frame.data_length = strlen(frame.data);
     frame.timestamp = (uint32_t)time(NULL);
-    frame.checksum = calculate_checksum(frame.data, frame.data_length);
+    frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
     logInfo("[INFO]: Enviando solicitud DISTORT a Gotham...");
     send_frame(gothamSocket, &frame);
@@ -479,6 +578,13 @@ void processDistortFileCommand(const char *fileName, const char *factor, int got
                 sscanf(response.data, "%15[^&]&%d", workerIp, &workerPort);
 
                 logInfo("[INFO]: Conectando al Worker...");
+                printf("Port: %d, ip: %s", workerPort, workerIp);
+                if (strlen(workerIp) == 0 || workerPort <= 0) {
+                    logError("[ERROR]: Datos del Worker inválidos recibidos.");
+                    return;
+                }
+                printf("[DEBUG]: Intentando conectar al Worker - IP: %s, Puerto: %d\n", workerIp, workerPort);
+
                 workerSocket = connect_to_server(workerIp, workerPort);
                 if (workerSocket < 0) {
                     logError("[ERROR]: No se pudo conectar al Worker.");
@@ -491,7 +597,7 @@ void processDistortFileCommand(const char *fileName, const char *factor, int got
                 frame.type = 0x03;
                 frame.data_length = strlen(frame.data);
                 frame.timestamp = (uint32_t)time(NULL);
-                frame.checksum = calculate_checksum(frame.data, frame.data_length);
+                frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
                 logInfo("[INFO]: Enviando solicitud DISTORT FILE al Worker...");
                 send_frame(workerSocket, &frame);
@@ -501,8 +607,10 @@ void processDistortFileCommand(const char *fileName, const char *factor, int got
                 if (receive_frame(workerSocket, &workerResponse) == 0) {
                     if (workerResponse.type == 0x03 && workerResponse.data_length == 0) {
                         logSuccess("[SUCCESS]: Worker listo para recibir.");
-                        sendFileToWorker(workerSocket, fileName); // Enviar el archivo
-                        receiveDistortedFileFromWorker(workerSocket);
+                        char userName[] = "defaultUser"; // Placeholder para el nombre de usuario
+                        char fileSize[] = "PLACEHOLDER_SIZE"; // Tamaño del archivo
+                        char md5Sum[] = "PLACEHOLDER_MD5";    // MD5 placeholder
+                        sendDistortFileRequest(workerSocket, userName, fileName, fileSize, md5Sum, factor); // Enviar el archivo
                     } else if (workerResponse.type == 0x03 && strcmp(workerResponse.data, "CON_KO") == 0) {
                         logError("[ERROR]: Worker rechazó la conexión.");
                     } else {
@@ -518,7 +626,7 @@ void processDistortFileCommand(const char *fileName, const char *factor, int got
             }
 
         } else {
-            logError("[ERROR]: Respuesta inesperada de Gotham.");
+            logError("[ERROR]: No hay workers encontrados por Gotham.");
         }
     } else {
         logError("[ERROR]: No se recibió respuesta de Gotham.");
@@ -526,55 +634,73 @@ void processDistortFileCommand(const char *fileName, const char *factor, int got
 }
 
 
-void sendDisconnectFrame(int socket_fd, const char *userName) {
+void sendDisconnectFrameToGotham(const char *userName) {
     Frame frame = {0};
     frame.type = 0x07; // Tipo de desconexión
     frame.timestamp = (uint32_t)time(NULL);
-
+    
+    // Incluir el nombre de usuario en la trama
     if (userName) {
-        snprintf(frame.data, sizeof(frame.data), "%s", userName);
-        frame.data_length = strlen(frame.data); // Esto define cuánto se usa de los datos
+        strncpy(frame.data, userName, sizeof(frame.data) - 1);
+        frame.data_length = strlen(frame.data);
     } else {
-        frame.data_length = 0; // Sin datos
+        frame.data_length = 0; // Sin datos adicionales
     }
     
-    frame.checksum = calculate_checksum(frame.data, frame.data_length);
-      printf("[DEBUG][Fleck] Enviando Frame: Type=%02x, DATA_LENGTH=%04x, Checksum=%04x, Data='%s'\n",
-           frame.type, frame.data_length, frame.checksum, frame.data);
+    frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
-    if (send_frame(socket_fd, &frame) < 0) {
-        logError("[ERROR]: No se pudo enviar el frame de desconexión.");
+    logInfo("[INFO]: Enviando trama de desconexión a Gotham...");
+    if (send_frame(gothamSocket, &frame) < 0) {
+        logError("[ERROR]: Fallo al enviar trama de desconexión a Gotham.");
     } else {
-        logInfo("[INFO]: Frame de desconexión enviado correctamente.");
+        logInfo("[INFO]: Trama de desconexión enviada correctamente a Gotham.");
+    }
+}
+
+void sendDisconnectFrameToWorker(int workerSocket, const char *userName) {
+    Frame frame = {0};
+    frame.type = 0x07; // Tipo de desconexión
+    frame.timestamp = (uint32_t)time(NULL);
+    
+    // Incluir el nombre de usuario en la trama
+    if (userName) {
+        strncpy(frame.data, userName, sizeof(frame.data) - 1);
+        frame.data_length = strlen(frame.data);
+    } else {
+        frame.data_length = 0; // Sin datos adicionales
+    }
+
+    frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
+
+    logInfo("[INFO]: Enviando trama de desconexión al Worker...");
+    if (send_frame(workerSocket, &frame) < 0) {
+        logError("[ERROR]: Fallo al enviar trama de desconexión al Worker.");
+    } else {
+        logInfo("[INFO]: Trama de desconexión enviada correctamente al Worker.");
     }
 }
 
 // FASE 1
 void signalHandler(int sig) {
     if (sig == SIGINT) {
-        printColor(ANSI_COLOR_YELLOW, "\n[INFO]: Alliberació de memòria...\n");
+        logInfo("[INFO]: Señal SIGINT recibida. Desconectando...");
 
-        if (gothamSocket != -1) {
-            sendDisconnectFrame(gothamSocket, globalFleckConfig->user);
+        // Desconexión de Gotham
+        if (gothamSocket >= 0) {
+            sendDisconnectFrameToGotham(globalFleckConfig->user);
             close(gothamSocket);
-            gothamSocket = -1;
         }
 
-        if (globalFleckConfig) {
-            alliberarMemoria(globalFleckConfig); // Liberar memoria asignada a la configuración
-            globalFleckConfig = NULL; // Evitar accesos posteriores
+        // Desconexión de Worker
+        if (workerSocket >= 0) {
+            sendDisconnectFrameToWorker(workerSocket, globalFleckConfig->user);
+            close(workerSocket);
         }
 
-        printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Recursos alliberats correctament.\n");
+        free(globalFleckConfig);
+        logInfo("[INFO]: Fleck desconectado correctamente. Cerrando aplicación.");
         exit(0);
     }
-}
-
-void alliberarMemoria(FleckConfig *fleckConfig) {
-    if (fleckConfig->user) free(fleckConfig->user);
-    if (fleckConfig->directory) free(fleckConfig->directory);
-    if (fleckConfig->ipGotham) free(fleckConfig->ipGotham);
-    free(fleckConfig);
 }
 
 int main(int argc, char *argv[]) {
@@ -613,7 +739,7 @@ int main(int argc, char *argv[]) {
         }
 
         printF("\033[1;36m[INFO]: Processant la comanda...\n\033[0m");
-        processCommand(command, gothamSocket);
+        processCommand(command, gothamSocket, workerSocket);
         free(command);
     }
 

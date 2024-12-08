@@ -45,8 +45,6 @@ int deserialize_frame(const char *buffer, Frame *frame) {
                              &frame->timestamp, &frame->checksum,
                              data);
 
-    printf("[DEBUG][Gotham] Fields read: %d\n", fields_read);
-
     // Validar que se hayan leído los campos obligatorios
     if (fields_read < 4) { // DATA es opcional si DATA_LENGTH = 0
         fprintf(stderr, "[ERROR][Deserialize] Formato inválido en el frame\n");
@@ -66,9 +64,6 @@ int deserialize_frame(const char *buffer, Frame *frame) {
     } else {
         frame->data[0] = '\0'; // DATA vacío
     }
-
-    printf("[DEBUG][Gotham] Frame deserializado: Type=%02x, DATA_LENGTH=%04x, Checksum=%04x, Data='%s'\n",
-           frame->type, frame->data_length, frame->checksum, frame->data);
     return 0; // Deserialización exitosa
 }
 
@@ -114,30 +109,29 @@ int receive_frame(int socket_fd, Frame *frame) {
         return -1;
     }
 
-    // Debug: Mostrar el contenido del buffer recibido
-    printf("[DEBUG][ReceiveFrame] Buffer recibido: %.*s\n", (int)bytesRead, buffer);
-
     // Intentar deserializar el frame
     if (deserialize_frame(buffer, frame) != 0) {
         fprintf(stderr, "[ERROR][ReceiveFrame] Error deserializando el frame recibido\n");
         return -1;
     }
 
-    // Debug: Mostrar información del frame deserializado
-    printf("[DEBUG][ReceiveFrame] Frame deserializado correctamente: "
-           "Type=%02x, Length=%04x, Timestamp=%08x, Checksum=%04x, Data=%s\n",
-           frame->type, frame->data_length, frame->timestamp, frame->checksum, frame->data);
-
     return 0; // Éxito
 }
 
 
 // Calcula el checksum de un conjunto de datos
-uint16_t calculate_checksum(const char *data, size_t length) {
+uint16_t calculate_checksum(const char *data, size_t length, int include_null) {
     uint32_t sum = 0;
+
     for (size_t i = 0; i < length; i++) {
         sum += (uint8_t)data[i];
     }
+
+    // Solo incluir el nulo final si el flag está habilitado
+    if (include_null && length < DATA_MAX_SIZE) {
+        sum += '\0';
+    }
+
     return (uint16_t)(sum % CHECKSUM_MODULO);
 }
 
