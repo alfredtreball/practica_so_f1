@@ -15,6 +15,9 @@
 #include "Networking/Networking.h"
 #include "FrameUtils/FrameUtils.h"
 #include "Logging/Logging.h"
+#include "MD5SUM/md5Sum.h"
+#include "File_transfer/file_transfer.h"
+
 
 void *handleFleckFrames(void *arg);
 void processReceivedFrameFromFleck(int clientSocket, const Frame *request);
@@ -86,10 +89,55 @@ void *handleFleckFrames(void *arg) {
     return NULL;
 }
 
+void send_frame_with_error(int clientSocket, const char *errorMessage) {
+    Frame errorFrame = {0};
+    errorFrame.type = 0x03; // Tipo estándar para error
+    strncpy(errorFrame.data, errorMessage, sizeof(errorFrame.data) - 1);
+    errorFrame.data_length = strlen(errorFrame.data);
+    errorFrame.timestamp = (uint32_t)time(NULL);
+    errorFrame.checksum = calculate_checksum(errorFrame.data, errorFrame.data_length, 0);
+
+    logInfo("[INFO]: Enviando trama de error al cliente.");
+    if (send_frame(clientSocket, &errorFrame) < 0) {
+        logError("[ERROR]: Error al enviar trama de error.");
+    }
+}
+
+void send_frame_with_ok(int clientSocket) {
+    Frame okFrame = {0};
+    okFrame.type = 0x03; // Tipo estándar para confirmación
+    okFrame.data_length = 0; // Sin datos adicionales
+    okFrame.timestamp = (uint32_t)time(NULL);
+    okFrame.checksum = calculate_checksum(okFrame.data, okFrame.data_length, 0);
+
+    logInfo("[INFO]: Enviando trama de confirmación OK al cliente.");
+    if (send_frame(clientSocket, &okFrame) < 0) {
+        logError("[ERROR]: Error al enviar trama de confirmación.");
+    }
+}
 
 void sendDistortedFileToFleck(int clientSocket, const char *originalFileContent, size_t originalFileSize) {
-    logInfo("Procesando el archivo distrosionado");
-    // Enviar los datos del archivo en tramas (0x05)
+    logInfo("[INFO]: Procesando el archivo distorsionado.");
+
+    // Calcular MD5SUM del archivo original
+    char md5Sum[33];
+    calculate_md5("ruta_del_archivo_original", md5Sum);
+
+    // **Trama 0x04**: Enviar información del archivo (FileSize & MD5SUM)
+    char fileSize[16];
+    snprintf(fileSize, sizeof(fileSize), "%zu", originalFileSize);
+
+    Frame infoFrame = {0};
+    infoFrame.type = 0x04;
+    snprintf(infoFrame.data, sizeof(infoFrame.data), "%s&%s", fileSize, md5Sum);
+    infoFrame.data_length = strlen(infoFrame.data);
+    infoFrame.timestamp = (uint32_t)time(NULL);
+    infoFrame.checksum = calculate_checksum(infoFrame.data, infoFrame.data_length, 0);
+
+    logInfo("[INFO]: Enviando trama 0x04 con información del archivo.");
+    send_frame(clientSocket, &infoFrame);
+
+    // **Tramas 0x05**: Enviar datos del archivo en fragmentos
     size_t offset = 0;
     while (offset < originalFileSize) {
         Frame dataFrame = {0};
@@ -107,12 +155,14 @@ void sendDistortedFileToFleck(int clientSocket, const char *originalFileContent,
     }
 
     logInfo("[INFO]: Todos los fragmentos del archivo distorsionado enviados.");
-    // Simulación de verificación del MD5SUM
-    int md5Valid = 1; // Cambiar a 0 para simular fallo en validación
+
+    // **Trama 0x06**: Validar MD5SUM del archivo recibido
+    char receivedMd5[33];
+    calculate_md5("ruta_del_archivo_distorsionado", receivedMd5);
+
     Frame validationFrame = {0};
     validationFrame.type = 0x06;
-
-    if (md5Valid) {
+    if (strcmp(md5Sum, receivedMd5) == 0) {
         strncpy(validationFrame.data, "CHECK_OK", sizeof(validationFrame.data) - 1);
     } else {
         strncpy(validationFrame.data, "CHECK_KO", sizeof(validationFrame.data) - 1);
@@ -127,6 +177,7 @@ void sendDistortedFileToFleck(int clientSocket, const char *originalFileContent,
     logInfo("[INFO]: Resultado de validación del MD5SUM enviado.");
 }
 
+
 void receiveFileFromFleck(int clientSocket, char **fileContent, size_t *fileSize) {
     logInfo("[INFO]: Recibiendo archivo desde Fleck...");
 
@@ -136,12 +187,33 @@ void receiveFileFromFleck(int clientSocket, char **fileContent, size_t *fileSize
         return;
     }
 
-    // Mostrar los valores recibidos de FileSize y MD5SUM
-    logInfo("[INFO]: Trama 0x04 recibida.");
-    logInfo("[INFO]: Datos recibidos:");
-    logInfo(request.data);
+    // Validar contenido de la trama
+    char fileSizeStr[20], md5Sum[33];
+    if (sscanf(request.data, "%19[^&]&%32s", fileSizeStr, md5Sum) != 2) {
+        logError("[ERROR]: Formato inválido en la trama 0x04.");
+        send_frame_with_error(clientSocket, "FORMAT_INVALID");
+        return;
+    }
 
-    // Preparar buffer para recibir datos
+    // Aceptar PLACEHOLDER valores para tamaño y MD5
+    if (strcmp(fileSizeStr, "PLACEHOLDER_SIZE") == 0) {
+        logWarning("[WARNING]: Tamaño del archivo es un marcador de posición.");
+        *fileSize = 0; // Valor por defecto para continuar
+    } else {
+        *fileSize = atol(fileSizeStr); // Convertir tamaño real
+    }
+
+    if (strcmp(md5Sum, "PLACEHOLDER_MD5") == 0) {
+        logWarning("[WARNING]: MD5 es un marcador de posición.");
+    }
+
+    logInfo("[INFO]: Trama 0x04 recibida.");
+    logInfo("[INFO]: Tamaño del archivo:");
+    logInfo(fileSizeStr);
+    logInfo("[INFO]: MD5 del archivo:");
+    logInfo(md5Sum);
+
+    // Continuar con la recepción de datos
     size_t bufferCapacity = 1024;
     size_t currentSize = 0;
     char *buffer = malloc(bufferCapacity);
@@ -150,21 +222,21 @@ void receiveFileFromFleck(int clientSocket, char **fileContent, size_t *fileSize
         return;
     }
 
-    // Recibir tramas 0x05 con datos
     while (1) {
         if (receive_frame(clientSocket, &request) == 0) {
-            if (request.type == 0x05) { // Datos del archivo
+            if (request.type == 0x05) {
                 if (currentSize + request.data_length > bufferCapacity) {
                     bufferCapacity *= 2;
                     buffer = realloc(buffer, bufferCapacity);
                     if (!buffer) {
-                        logError("[ERROR]: No se pudo reasignar memoria para el archivo.");
+                        logError("[ERROR]: No se pudo reasignar memoria.");
+                        free(buffer);
                         return;
                     }
                 }
                 memcpy(buffer + currentSize, request.data, request.data_length);
                 currentSize += request.data_length;
-            } else if (request.type == 0x06) { // Trama de validación
+            } else if (request.type == 0x06) {
                 logInfo("[INFO]: Trama de validación (0x06) recibida.");
                 break;
             } else {
@@ -172,7 +244,7 @@ void receiveFileFromFleck(int clientSocket, char **fileContent, size_t *fileSize
                 break;
             }
         } else {
-            logError("[ERROR]: Error al recibir archivo desde Fleck.");
+            logError("[ERROR]: Error al recibir datos del archivo.");
             break;
         }
     }
@@ -194,24 +266,15 @@ void processReceivedFrameFromFleck(int clientSocket, const Frame *request) {
             char userName[64], fileName[256], fileSize[20], md5Sum[33], factor[20];
             if (sscanf(request->data, "%63[^&]&%255[^&]&%19[^&]&%32[^&]&%19s",
                        userName, fileName, fileSize, md5Sum, factor) != 5) {
-                logError("[ERROR]: Formato de datos inválido en DISTORT FILE.");
-                Frame errorFrame = {.type = 0x03, .timestamp = time(NULL)};
-                strncpy(errorFrame.data, "CON_KO", sizeof(errorFrame.data) - 1);
-                errorFrame.data_length = strlen(errorFrame.data);
-                errorFrame.checksum = calculate_checksum(errorFrame.data, errorFrame.data_length, 0);
-                send_frame(clientSocket, &errorFrame);
+                logError("[ERROR]: Formato inválido en solicitud DISTORT FILE.");
+                send_frame_with_error(clientSocket, "CON_KO");
                 return;
             }
 
-            // Confirmar recepción con CON_OK
-            Frame okFrame = {.type = 0x03, .timestamp = time(NULL)};
-            strncpy(okFrame.data, "CON_OK", sizeof(okFrame.data) - 1);
-            okFrame.data_length = strlen(okFrame.data);
-            okFrame.checksum = calculate_checksum(okFrame.data, okFrame.data_length, 0);
-            send_frame(clientSocket, &okFrame);
-            logInfo("[INFO]: Enviada confirmación CON_OK a Fleck.");
+            // Confirmar recepción
+            send_frame_with_ok(clientSocket);
 
-            // Esperar trama 0x04
+            // Recibir archivo de Fleck (0x04 y 0x05)
             char *fileContent = NULL;
             size_t numericFileSize = 0;
 
@@ -223,7 +286,8 @@ void processReceivedFrameFromFleck(int clientSocket, const Frame *request) {
             }
 
             logInfo("[INFO]: Archivo recibido correctamente. Procesando...");
-            // Aquí procesar el archivo
+
+            // Enviar archivo distorsionado a Fleck
             sendDistortedFileToFleck(clientSocket, fileContent, numericFileSize);
             free(fileContent);
             break;
@@ -233,6 +297,7 @@ void processReceivedFrameFromFleck(int clientSocket, const Frame *request) {
             break;
     }
 }
+
 
 // Procesa un frame recibido de Gotham
 void processReceivedFrame(int gothamSocket, const Frame *response) {

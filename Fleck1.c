@@ -452,31 +452,31 @@ void sendFileToWorker(int workerSocket, const char *fileName) {
 }
 
 void receiveDistortedFileFromWorker(int workerSocket) {
-    char filePath[] = "distorted_file"; // Guardaremos el archivo distorsionado aquí
-    int fileFd = open(filePath, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    if (fileFd < 0) {
-        logError("[ERROR]: No se pudo crear el archivo distorsionado.");
-        return;
-    }
+    Frame frame = {0};
 
-    Frame response;
-    while (receive_frame(workerSocket, &response) == 0) {
-        if (response.type == 0x05) { // Esperar fragmentos distorsionados
-            logInfo("[INFO]: Recibiendo fragmento de archivo distorsionado...");
-            write(fileFd, response.data, response.data_length);
-        } else if (response.type == 0x06) { // Validación de MD5SUM
-            logInfo("[INFO]: Recibida validación del MD5SUM.");
-            if (strcmp(response.data, "CHECK_OK") == 0) {
-                logSuccess("[SUCCESS]: MD5SUM validado correctamente.");
-            } else {
-                logError("[ERROR]: MD5SUM del archivo distorsionado no coincide.");
-            }
-            break; // Finalizar recepción después de la validación
+    // Recibir la información del archivo (0x04)
+    if (receive_frame(workerSocket, &frame) == 0 && frame.type == 0x04) {
+        char fileSize[16], md5Sum[33];
+        sscanf(frame.data, "%15[^&]&%32s", fileSize, md5Sum);
+        logInfo("[INFO]: Información del archivo distorsionado recibida.");
+
+        // Crear el archivo para guardar datos
+        int fd = open("distorted_file", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd < 0) {
+            logError("[ERROR]: No se pudo crear el archivo distorsionado.");
+            return;
         }
-    }
 
-    close(fileFd);
-    logInfo("[INFO]: Archivo distorsionado recibido y procesado.");
+        // Recibir datos del archivo (0x05)
+        while (receive_frame(workerSocket, &frame) == 0 && frame.type == 0x05) {
+            write(fd, frame.data, frame.data_length);
+        }
+        close(fd);
+
+        logInfo("[INFO]: Archivo distorsionado recibido.");
+    } else {
+        logError("[ERROR]: No se recibió información válida del archivo distorsionado.");
+    }
 }
 
 

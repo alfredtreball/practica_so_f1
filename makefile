@@ -12,10 +12,10 @@
 
 # Variables
 CC = gcc
-CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking -IFrameUtils -ILogging
+CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking -IFrameUtils -ILogging -IMD5SUM
 
 # Comunes
-COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c FrameUtils/FrameUtils.c Logging/Logging.c
+COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c FrameUtils/FrameUtils.c Logging/Logging.c MD5SUM/md5Sum.c
 
 # Objectius per compilar cada executable
 all: Fleck_Montserrat.exe Fleck_Matagalls.exe Harley_Montserrat.exe Harley_Matagalls.exe \
@@ -52,6 +52,9 @@ Enigma_Puigpedros.exe: Enigma.c $(COMMON)
 # Regles per executar automàticament cada programa amb el fitxer de configuració corresponent
 gm: Gotham_Montserrat.exe
 	./Gotham_Montserrat.exe fitxers_configuració/config_gotham.dat
+
+vgm: Gotham_Montserrat.exe
+	valgrind --dsymutil=yes --track-origins=yes --leak-check=full --track-fds=yes --show-reachable=yes -s ./Gotham_Montserrat.exe fitxers_configuració/config_gotham.dat
 
 fm: Fleck_Montserrat.exe
 	./Fleck_Montserrat.exe fitxers_configuració/config_fleck.dat
