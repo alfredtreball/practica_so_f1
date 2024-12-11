@@ -31,6 +31,14 @@
 #include "FrameUtils/FrameUtils.h"
 #include "Logging/Logging.h"
 
+typedef struct {
+    int server_fd_fleck;
+    int server_fd_enigma;
+} ServerFds;
+
+static ServerFds *global_server_fds = NULL;
+static GothamConfig *global_config = NULL;
+
 // Representa un worker que es connecta a Gotham
 typedef struct {
     char ip[16];    // Direcció IP del worker
@@ -521,7 +529,9 @@ void *gestionarConexion(void *arg) {
     WorkerManager *workerManager = args->workerManager;
     ClientManager *clientManager = args->clientManager;
 
-    free(args); // Liberamos args una vez
+    // Liberamos args inmediatamente después de guardar los datos relevantes
+    free(args);
+    args = NULL; // Asegurarnos de que no sea usado accidentalmente
 
     if (!workerManager || !clientManager) {
         logError("[ERROR]: WorkerManager o ClientManager NULL en gestionarConexion.");
@@ -849,7 +859,6 @@ void handleSigint(int sig) {
 
     if (workerManager) {
         pthread_mutex_lock(&workerManager->mutex);
-
         for (int i = 0; i < workerManager->workerCount; i++) {
             WorkerInfo *worker = &workerManager->workers[i];
             Frame closeFrame = {.type = 0xFF, .timestamp = (uint32_t)time(NULL)};
@@ -857,15 +866,32 @@ void handleSigint(int sig) {
             send_frame(worker->socket_fd, &closeFrame);
             close(worker->socket_fd);
         }
-
         pthread_mutex_unlock(&workerManager->mutex);
         freeWorkerManager(workerManager);
+    }
+
+    if (clientManager) {
+        pthread_mutex_lock(&clientManager->mutex);
+        for (int i = 0; i < clientManager->clientCount; i++) {
+            close(clientManager->clients[i].socket_fd);
+        }
+        pthread_mutex_unlock(&clientManager->mutex);
+        freeClientManager(clientManager);
+    }
+
+    if (global_server_fds) {
+        close(global_server_fds->server_fd_fleck);
+        close(global_server_fds->server_fd_enigma);
+    }
+
+    if (global_config) {
+        free(global_config);
+        global_config = NULL;
     }
 
     logSuccess("Sistema tancat correctament.\n");
     exit(0);
 }
-
 
 // Funció principal del servidor Gotham
 int main(int argc, char *argv[]) {
@@ -875,9 +901,10 @@ int main(int argc, char *argv[]) {
     }
 
     mostrarCaratula();
-    signal(SIGINT, handleSigint);
 
     GothamConfig *config = malloc(sizeof(GothamConfig));
+    global_config = config; // Asignar el puntero global
+
     if (!config) {
         logError("Error asignando memoria para la configuración.\n");
         return EXIT_FAILURE;
@@ -886,11 +913,20 @@ int main(int argc, char *argv[]) {
     readConfigFileGeneric(argv[1], config, CONFIG_GOTHAM);
     logInfo("Configuración cargada correctamente.\n");
 
-    int server_fd_fleck = startServer(config->ipFleck, config->portFleck);
-    int server_fd_enigma = startServer(config->ipHarEni, config->portHarEni);
-    if (server_fd_fleck < 0 || server_fd_enigma < 0) {
+    ServerFds server_fds;
+    global_server_fds = &server_fds; // Asignar el puntero global
+
+    signal(SIGINT, handleSigint);
+    
+    server_fds.server_fd_fleck = startServer(config->ipFleck, config->portFleck);
+    server_fds.server_fd_enigma = startServer(config->ipHarEni, config->portHarEni);
+
+    if (server_fds.server_fd_fleck < 0 || server_fds.server_fd_enigma < 0) {
         logError("Error al iniciar los servidores.\n");
+        if (server_fds.server_fd_fleck >= 0) close(server_fds.server_fd_fleck);
+        if (server_fds.server_fd_enigma >= 0) close(server_fds.server_fd_enigma);
         free(config);
+        global_config = NULL;
         return EXIT_FAILURE;
     }
 
@@ -904,10 +940,11 @@ int main(int argc, char *argv[]) {
     while (1) {
         fd_set read_fds;
         FD_ZERO(&read_fds);
-        FD_SET(server_fd_fleck, &read_fds);
-        FD_SET(server_fd_enigma, &read_fds);
+        FD_SET(server_fds.server_fd_fleck, &read_fds);
+        FD_SET(server_fds.server_fd_enigma, &read_fds);
 
-        int max_fd = (server_fd_fleck > server_fd_enigma) ? server_fd_fleck : server_fd_enigma;
+        int max_fd = (server_fds.server_fd_fleck > server_fds.server_fd_enigma) ? 
+                        server_fds.server_fd_fleck : server_fds.server_fd_enigma;
 
         logInfo("Esperando conexiones...");
         int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
@@ -917,8 +954,8 @@ int main(int argc, char *argv[]) {
         }
 
         // Manejo de conexiones de Fleck (clientes)
-        if (FD_ISSET(server_fd_fleck, &read_fds)) {
-            int client_fd = accept_connection(server_fd_fleck);
+        if (FD_ISSET(server_fds.server_fd_fleck, &read_fds)) {
+            int client_fd = accept_connection(server_fds.server_fd_fleck);
             if (client_fd >= 0) {
                 logInfo("[INFO]: Conexión aceptada desde Fleck.");
                 pthread_t thread;
@@ -943,8 +980,8 @@ int main(int argc, char *argv[]) {
         }
 
         // Manejo de conexiones de Harley/Enigma (workers)
-        if (FD_ISSET(server_fd_enigma, &read_fds)) {
-            int client_fd = accept_connection(server_fd_enigma);
+        if (FD_ISSET(server_fds.server_fd_enigma, &read_fds)) {
+            int client_fd = accept_connection(server_fds.server_fd_enigma);
             if (client_fd >= 0) {
                 logInfo("[INFO]: Conexión aceptada desde Harley/Enigma.");
                 pthread_t thread;
@@ -972,8 +1009,8 @@ int main(int argc, char *argv[]) {
     // Liberar recursos
     freeWorkerManager(manager);
     freeClientManager(clientManager);
-    close(server_fd_fleck);
-    close(server_fd_enigma);
+    close(server_fds.server_fd_fleck);
+    close(server_fds.server_fd_enigma);
     free(config);
 
     logInfo("Servidor Gotham cerrado correctamente.\n");

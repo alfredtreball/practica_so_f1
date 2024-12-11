@@ -60,12 +60,6 @@ int startServer(const char *ip, int port) {
 
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    /*if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0) {
-        printF("IP no válida\n");
-        close(server_fd);
-        return -1;
-    }*/
-
     if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         printF("Error en el bind\n");
         close(server_fd);

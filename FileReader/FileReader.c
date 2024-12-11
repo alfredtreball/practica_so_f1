@@ -1,4 +1,3 @@
-// FileReader.c
 #define _GNU_SOURCE
 
 #include <stdlib.h>
@@ -87,44 +86,44 @@ void readConfigFileGeneric(const char *configFile, void *configStruct, ConfigTyp
     switch (configType) {
         case CONFIG_ENIGMA: {
             EnigmaConfig *config = (EnigmaConfig *)configStruct;
-            config->ipGotham = trim(readUntil(fd, '\n'));
+            config->ipGotham = trim(readUntil(fd, '\n')); // Liberar después
             line = readUntil(fd, '\n');
             config->portGotham = atoi(line);
             free(line);
 
-            config->ipFleck = trim(readUntil(fd, '\n'));
+            config->ipFleck = trim(readUntil(fd, '\n')); // Liberar después
             line = readUntil(fd, '\n');
             config->portFleck = atoi(line);
             free(line);
 
-            config->directory = readUntil(fd, '\n');
-            config->workerType = readUntil(fd, '\n');
+            config->directory = readUntil(fd, '\n'); // Liberar después
+            config->workerType = readUntil(fd, '\n'); // Liberar después
             break;
         }
         case CONFIG_HARLEY: {
             HarleyConfig *config = (HarleyConfig *)configStruct;
-            config->ipGotham = trim(readUntil(fd, '\n'));
+            config->ipGotham = trim(readUntil(fd, '\n')); // Liberar después
             line = readUntil(fd, '\n');
             config->portGotham = atoi(line);
             free(line);
 
-            config->ipFleck = trim(readUntil(fd, '\n'));
+            config->ipFleck = trim(readUntil(fd, '\n')); // Liberar después
             line = readUntil(fd, '\n');
             config->portFleck = atoi(line);
             free(line);
 
-            config->directory = readUntil(fd, '\n');
-            config->workerType = readUntil(fd, '\n');
+            config->directory = readUntil(fd, '\n'); // Liberar después
+            config->workerType = readUntil(fd, '\n'); // Liberar después
             break;
         }
         case CONFIG_GOTHAM: {
             GothamConfig *config = (GothamConfig *)configStruct;
-            config->ipFleck = trim(readUntil(fd, '\n'));
+            config->ipFleck = trim(readUntil(fd, '\n')); // Liberar después
             line = readUntil(fd, '\n');
             config->portFleck = atoi(line);
             free(line);
 
-            config->ipHarEni = trim(readUntil(fd, '\n'));
+            config->ipHarEni = trim(readUntil(fd, '\n')); // Liberar después
             line = readUntil(fd, '\n');
             config->portHarEni = atoi(line);
             free(line);
@@ -132,15 +131,15 @@ void readConfigFileGeneric(const char *configFile, void *configStruct, ConfigTyp
         }
         case CONFIG_FLECK: {
             FleckConfig *config = (FleckConfig *)configStruct;
-            config->user = readUntil(fd, '\n');
-            config->directory = trim(readUntil(fd, '\n'));
-            config->ipGotham = trim(readUntil(fd, '\n'));
+            config->user = readUntil(fd, '\n'); // Liberar después
+            config->directory = trim(readUntil(fd, '\n')); // Liberar después
+            config->ipGotham = trim(readUntil(fd, '\n')); // Liberar después
 
             line = readUntil(fd, '\n');
             config->portGotham = atoi(line);
-            printf("[DEBUG Config]: Usuario: %s\n", config->user);
-
             free(line);
+
+            printf("[DEBUG Config]: Usuario: %s\n", config->user);
             break;
         }
         default:
@@ -156,45 +155,78 @@ void readConfigFileGeneric(const char *configFile, void *configStruct, ConfigTyp
         case CONFIG_ENIGMA: {
             EnigmaConfig *config = (EnigmaConfig *)configStruct;
             printF("IP Gotham - "); printF(config->ipGotham);
+            free(config->ipGotham); // Liberar memoria
+
             printF("\nPort Gotham - ");
             char *portStr; asprintf(&portStr, "%d", config->portGotham); printF(portStr); free(portStr);
+
             printF("\nIP Fleck - "); printF(config->ipFleck);
+            free(config->ipFleck); // Liberar memoria
+
             printF("\nPort Fleck - ");
             asprintf(&portStr, "%d", config->portFleck); printF(portStr); free(portStr);
+
             printF("\nDirectori - "); printF(config->directory);
-            printF("\nTipus de treballador - "); printF(config->workerType); printF("\n");
+            free(config->directory); // Liberar memoria
+
+            printF("\nTipus de treballador - "); printF(config->workerType);
+            free(config->workerType); // Liberar memoria
+            printF("\n");
             break;
         }
         case CONFIG_HARLEY: {
             HarleyConfig *config = (HarleyConfig *)configStruct;
             printF("IP Gotham - "); printF(config->ipGotham);
+            free(config->ipGotham); // Liberar memoria
+
             printF("\nPort Gotham - ");
             char *portStr; asprintf(&portStr, "%d", config->portGotham); printF(portStr); free(portStr);
+
             printF("\nIP Fleck - "); printF(config->ipFleck);
+            free(config->ipFleck); // Liberar memoria
+
             printF("\nPort Fleck - ");
             asprintf(&portStr, "%d", config->portFleck); printF(portStr); free(portStr);
+
             printF("\nDirectori - "); printF(config->directory);
-            printF("\nTipus de treballador - "); printF(config->workerType); printF("\n");
+            free(config->directory); // Liberar memoria
+
+            printF("\nTipus de treballador - "); printF(config->workerType);
+            free(config->workerType); // Liberar memoria
+            printF("\n");
             break;
         }
         case CONFIG_GOTHAM: {
             GothamConfig *config = (GothamConfig *)configStruct;
             printF("IP Fleck - "); printF(config->ipFleck);
+            free(config->ipFleck); // Liberar memoria
+
             printF("\nPort Fleck - ");
             char *portStr; asprintf(&portStr, "%d", config->portFleck); printF(portStr); free(portStr);
+
             printF("\nIP Harley Enigma - "); printF(config->ipHarEni);
+            free(config->ipHarEni); // Liberar memoria
+
             printF("\nPort Harley Enigma - ");
             asprintf(&portStr, "%d", config->portHarEni); printF(portStr); free(portStr);
+
             printF("\n");
             break;
         }
         case CONFIG_FLECK: {
             FleckConfig *config = (FleckConfig *)configStruct;
             printF("Usuari - "); printF(config->user);
+            free(config->user); // Liberar memoria
+
             printF("\nDirectori - "); printF(config->directory);
+            free(config->directory); // Liberar memoria
+
             printF("\nIP Gotham - "); printF(config->ipGotham);
+            free(config->ipGotham); // Liberar memoria
+
             printF("\nPort Gotham - ");
             char *portStr; asprintf(&portStr, "%d", config->portGotham); printF(portStr); free(portStr);
+
             printF("\n");
             break;
         }
