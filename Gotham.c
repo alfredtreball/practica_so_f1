@@ -31,6 +31,8 @@
 #include "FrameUtils/FrameUtils.h"
 #include "Logging/Logging.h"
 
+volatile sig_atomic_t stop_server = 0; // Bandera para indicar el cierre
+
 typedef struct {
     int server_fd_fleck;
     int server_fd_enigma;
@@ -140,12 +142,14 @@ ClientManager *createClientManager() {
     return manager;
 }
 
-// Libera la memoria del ClientManager
 void freeClientManager(ClientManager *manager) {
     if (manager) {
-        free(manager->clients);
-        pthread_mutex_destroy(&manager->mutex);
-        free(manager);
+        if (manager->clients) {
+            free(manager->clients); // Liberar la lista dinámica de clientes
+        }
+        pthread_mutex_destroy(&manager->mutex); // Destruir el mutex
+        free(manager); // Liberar la estructura principal
+        logInfo("[DEBUG]: ClientManager liberado correctamente.");
     }
 }
 
@@ -516,12 +520,16 @@ void handleWorkerFailure(const char *mediaType, WorkerManager *manager, int clie
 // Allibera la memòria utilitzada pel WorkerManager
 void freeWorkerManager(WorkerManager *manager) {
     if (manager) {
-        free(manager->workers);
-        pthread_mutex_destroy(&manager->mutex);
-        free(manager);
+        if (manager->workers) {
+            free(manager->workers); // Liberar la lista dinámica de workers
+        }
+        pthread_mutex_destroy(&manager->mutex); // Destruir el mutex
+        free(manager); // Liberar la estructura principal
+        logInfo("[DEBUG]: WorkerManager liberado correctamente.");
     }
 }
 
+// Gestiona la connexió amb un client
 // Gestiona la connexió amb un client
 void *gestionarConexion(void *arg) {
     ConnectionArgs *args = (ConnectionArgs *)arg;
@@ -542,7 +550,7 @@ void *gestionarConexion(void *arg) {
     Frame frame;
     int disconnectHandled = 0;
 
-    // Manejo de frames
+    // Manejo de frames inicial
     if (receive_frame(client_fd, &frame) != 0) {
         logError("[ERROR]: Error al recibir el primer frame del cliente.");
         close(client_fd);
@@ -551,18 +559,29 @@ void *gestionarConexion(void *arg) {
 
     processCommandInGotham(&frame, client_fd, workerManager, clientManager);
 
-    while (receive_frame(client_fd, &frame) == 0) {
-        if (frame.type == 0x07) {
+    // Bucle principal para manejar los frames del cliente
+    while (!stop_server) { // Verifica la bandera global para el cierre del servidor
+        if (receive_frame(client_fd, &frame) != 0) {
+            logInfo("[INFO]: El cliente cerró la conexión o hubo un error.");
+            break;
+        }
+
+        if (frame.type == 0x07) { // Trama de desconexión explícita del cliente
             logInfo("[DEBUG]: Trama de desconexión recibida.");
             handleDisconnectFrame(&frame, client_fd, workerManager, clientManager);
             disconnectHandled = 1;
             break;
         }
 
+        // Procesar el frame recibido
         processCommandInGotham(&frame, client_fd, workerManager, clientManager);
     }
 
-    if (!disconnectHandled) {
+    // Si el servidor está en proceso de cierre, gestionar recursos del cliente
+    if (stop_server && !disconnectHandled) {
+        logInfo("[INFO]: Finalizando conexión por cierre del servidor.");
+        removeClientBySocket(clientManager, client_fd);
+    } else if (!disconnectHandled) {
         logInfo("[INFO]: El cliente cerró la conexión sin trama de desconexión.");
         removeClientBySocket(clientManager, client_fd);
     }
@@ -856,34 +875,41 @@ void alliberarMemoria(GothamConfig *gothamConfig) {
 void handleSigint(int sig) {
     (void)sig;
     logInfo("S'ha rebut SIGINT. Tancant el sistema...\n");
+    stop_server = 1;
 
+    // Liberar los recursos de WorkerManager
     if (workerManager) {
         pthread_mutex_lock(&workerManager->mutex);
         for (int i = 0; i < workerManager->workerCount; i++) {
             WorkerInfo *worker = &workerManager->workers[i];
             Frame closeFrame = {.type = 0xFF, .timestamp = (uint32_t)time(NULL)};
             closeFrame.checksum = calculate_checksum(closeFrame.data, closeFrame.data_length, 1);
-            send_frame(worker->socket_fd, &closeFrame);
-            close(worker->socket_fd);
+            send_frame(worker->socket_fd, &closeFrame); // Informar al worker
+            close(worker->socket_fd); // Cerrar el socket
         }
         pthread_mutex_unlock(&workerManager->mutex);
-        freeWorkerManager(workerManager);
+        freeWorkerManager(workerManager); // Liberar el WorkerManager
+        workerManager = NULL;
     }
 
+    // Liberar los recursos de ClientManager
     if (clientManager) {
         pthread_mutex_lock(&clientManager->mutex);
         for (int i = 0; i < clientManager->clientCount; i++) {
-            close(clientManager->clients[i].socket_fd);
+            close(clientManager->clients[i].socket_fd); // Cerrar el socket del cliente
         }
         pthread_mutex_unlock(&clientManager->mutex);
-        freeClientManager(clientManager);
+        freeClientManager(clientManager); // Liberar el ClientManager
+        clientManager = NULL;
     }
 
+    // Cerrar los descriptores de archivo globales
     if (global_server_fds) {
         close(global_server_fds->server_fd_fleck);
         close(global_server_fds->server_fd_enigma);
     }
 
+    // Liberar la configuración global
     if (global_config) {
         free(global_config);
         global_config = NULL;
@@ -905,6 +931,9 @@ int main(int argc, char *argv[]) {
     GothamConfig *config = malloc(sizeof(GothamConfig));
     global_config = config; // Asignar el puntero global
 
+    WorkerManager *manager = NULL; // Declarar manager aquí
+    ClientManager *clientManager = NULL; // Declarar clientManager aquí
+
     if (!config) {
         logError("Error asignando memoria para la configuración.\n");
         return EXIT_FAILURE;
@@ -917,7 +946,7 @@ int main(int argc, char *argv[]) {
     global_server_fds = &server_fds; // Asignar el puntero global
 
     signal(SIGINT, handleSigint);
-    
+
     server_fds.server_fd_fleck = startServer(config->ipFleck, config->portFleck);
     server_fds.server_fd_enigma = startServer(config->ipHarEni, config->portHarEni);
 
@@ -925,6 +954,17 @@ int main(int argc, char *argv[]) {
         logError("Error al iniciar los servidores.\n");
         if (server_fds.server_fd_fleck >= 0) close(server_fds.server_fd_fleck);
         if (server_fds.server_fd_enigma >= 0) close(server_fds.server_fd_enigma);
+
+        if (clientManager) {
+            freeClientManager(clientManager);
+            clientManager = NULL;
+        }
+
+        if (manager) {
+            freeWorkerManager(manager);
+            manager = NULL;
+        }
+
         free(config);
         global_config = NULL;
         return EXIT_FAILURE;
@@ -933,22 +973,23 @@ int main(int argc, char *argv[]) {
     logSuccess("Servidores iniciados correctamente.\n");
 
     // Crear el WorkerManager compartido
-    WorkerManager *manager = createWorkerManager();
-    ClientManager *clientManager = createClientManager();
+    manager = createWorkerManager();
+    clientManager = createClientManager();
 
     // Bucle principal de aceptación de conexiones
-    while (1) {
+    while (!stop_server) {
         fd_set read_fds;
         FD_ZERO(&read_fds);
         FD_SET(server_fds.server_fd_fleck, &read_fds);
         FD_SET(server_fds.server_fd_enigma, &read_fds);
 
-        int max_fd = (server_fds.server_fd_fleck > server_fds.server_fd_enigma) ? 
+        int max_fd = (server_fds.server_fd_fleck > server_fds.server_fd_enigma) ?
                         server_fds.server_fd_fleck : server_fds.server_fd_enigma;
 
         logInfo("Esperando conexiones...");
         int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
         if (activity < 0) {
+            if (stop_server) break;
             perror("[ERROR]: Error en select");
             break;
         }
@@ -968,7 +1009,7 @@ int main(int argc, char *argv[]) {
                 args->client_fd = client_fd;
                 args->workerManager = manager;
                 args->clientManager = clientManager;
-                
+
                 if (pthread_create(&thread, NULL, gestionarConexion, args) != 0) {
                     perror("[ERROR]: Fallo al crear hilo para Fleck");
                     free(args);
@@ -1006,12 +1047,22 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Liberar recursos
-    freeWorkerManager(manager);
-    freeClientManager(clientManager);
+    // Antes de salir, libera todo explícitamente
+    if (manager) {
+        freeWorkerManager(manager);
+        manager = NULL;
+    }
+    if (clientManager) {
+        freeClientManager(clientManager);
+        clientManager = NULL;
+    }
+    if (config) {
+        free(config);
+        config = NULL;
+    }
+
     close(server_fds.server_fd_fleck);
     close(server_fds.server_fd_enigma);
-    free(config);
 
     logInfo("Servidor Gotham cerrado correctamente.\n");
     return EXIT_SUCCESS;
