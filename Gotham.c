@@ -186,7 +186,6 @@ void addClient(ClientManager *manager, const char *username, const char *ip, int
     strncpy(client->ip, ip, sizeof(client->ip) - 1);
     client->socket_fd = socket_fd;
 
-    logInfo("[INFO]: Cliente añadido exitosamente.");
     pthread_mutex_unlock(&manager->mutex);
 }
 
@@ -638,7 +637,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             if (sscanf(frame->data, "%63[^&]&%15[^&]&%d", username, ip, &port) != 3) {
                 logError("[ERROR]: Formato de datos de conexión inválido.");
                 response.type = 0x01;
-                strncpy(response.data, "CONN_KO", sizeof(response.data) - 1);
+                strncpy(response.data, "CON_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
                 response.checksum = calculate_checksum(response.data, response.data_length, 0);
                 send_frame(client_fd, &response);
@@ -650,14 +649,14 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
 
             char log_message[256];
             snprintf(log_message, sizeof(log_message),
-                    "[DEBUG]: Cliente conectado: Usuario: %s, IP: %s, Puerto: %d, Socket: %d\n",
+                    "[DEBUG]: Cliente conectado:  \nUsuario: %s, IP: %s, Puerto: %d, Socket: %d\n",
                     username, ip, port, client_fd);
             logInfo(log_message);
 
             // Enviar respuesta de éxito
             response.type = 0x01;
-            strncpy(response.data, "CONN_OK", sizeof(response.data) - 1);
-            response.data_length = strlen(response.data);
+            response.data[0] = '\0'; // Configurar datos como vacío
+            response.data_length = 0; // Longitud de datos = 0
             response.checksum = calculate_checksum(response.data, response.data_length, 0);
             send_frame(client_fd, &response);
             break;
@@ -948,7 +947,22 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, handleSigint);
 
     server_fds.server_fd_fleck = startServer(config->ipFleck, config->portFleck);
+    if (server_fds.server_fd_fleck >= 0) {
+        char log_message[256];
+        snprintf(log_message, sizeof(log_message), "[INFO]: Servidor Fleck iniciado en IP: %s, Puerto: %d", config->ipFleck, config->portFleck);
+        logInfo(log_message);
+    } else {
+        logError("[ERROR]: Error al iniciar el servidor para Fleck.");
+    }
+
     server_fds.server_fd_enigma = startServer(config->ipHarEni, config->portHarEni);
+    if (server_fds.server_fd_enigma >= 0) {
+        char log_message[256];
+        snprintf(log_message, sizeof(log_message), "[INFO]: Servidor Enigma iniciado en IP: %s, Puerto: %d", config->ipHarEni, config->portHarEni);
+        logInfo(log_message);
+    } else {
+        logError("[ERROR]: Error al iniciar el servidor para Enigma.");
+    }
 
     if (server_fds.server_fd_fleck < 0 || server_fds.server_fd_enigma < 0) {
         logError("Error al iniciar los servidores.\n");
@@ -966,6 +980,8 @@ int main(int argc, char *argv[]) {
         }
 
         free(config);
+        free(global_config->ipFleck);
+        free(global_config->ipHarEni);
         global_config = NULL;
         return EXIT_FAILURE;
     }

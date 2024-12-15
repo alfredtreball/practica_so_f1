@@ -12,11 +12,10 @@
 
 # Variables
 CC = gcc
-CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking -IFrameUtils -ILogging -IMD5SUM
+CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking -IFrameUtils -ILogging -IMD5SUM -IFrameUtilsBinary
 
 # Comunes
-COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c FrameUtils/FrameUtils.c Logging/Logging.c MD5SUM/md5Sum.c
-
+COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c FrameUtils/FrameUtils.c Logging/Logging.c MD5SUM/md5Sum.c FrameUtilsBinary/FrameUtilsBinary.c
 # Objectius per compilar cada executable
 all: Fleck_Montserrat.exe Fleck_Matagalls.exe Harley_Montserrat.exe Harley_Matagalls.exe \
      Harley_Puigpedros.exe Enigma_Puigpedros.exe Gotham_Montserrat.exe
@@ -34,16 +33,16 @@ Fleck_Matagalls.exe: Fleck.c $(COMMON)
 	$(CC) $(CFLAGS) Fleck.c $(COMMON) -o Fleck_Matagalls.exe
 
 # Compilació de Harley a Montserrat
-Harley_Montserrat.exe: Harley.c $(COMMON)
-	$(CC) $(CFLAGS) Harley.c $(COMMON) -o Harley_Montserrat.exe
+Harley_Montserrat.exe: Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c
+	$(CC) $(CFLAGS) Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c -o Harley_Montserrat.exe -lm
 
 # Compilació de Harley a Matagalls
-Harley_Matagalls.exe: Harley.c $(COMMON)
-	$(CC) $(CFLAGS) Harley.c $(COMMON) -o Harley_Matagalls.exe
+Harley_Matagalls.exe: Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c
+	$(CC) $(CFLAGS) Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c -o Harley_Matagalls.exe -lm
 
 # Compilació de Harley a Puigpedros
-Harley_Puigpedros.exe: Harley.c $(COMMON)
-	$(CC) $(CFLAGS) Harley.c $(COMMON) -o Harley_Puigpedros.exe
+Harley_Puigpedros.exe: Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c
+	$(CC) $(CFLAGS) Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c -o Harley_Puigpedros.exe -lm
 
 # Compilació de Enigma a Puigpedros
 Enigma_Puigpedros.exe: Enigma.c $(COMMON)
@@ -76,4 +75,4 @@ ep: Enigma_Puigpedros.exe
 
 # Neteja els fitxers generats
 clean:
-	rm -f *.exe
+	rm -f *.exe *.o

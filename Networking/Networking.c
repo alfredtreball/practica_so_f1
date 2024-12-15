@@ -46,34 +46,38 @@ int connect_to_server(const char *ip, int port) {
 
 // Inicia un servidor
 int startServer(const char *ip, int port) {
-    (void)ip;
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
-        printF("Error creando el socket del servidor\n");
+        perror("[ERROR]: Error creando socket");
+        return -1;
+    }
+    
+    struct sockaddr_in server_addr = {0};
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0) {
+        perror("[ERROR]: Dirección IP inválida");
+        fprintf(stderr, "[DEBUG]: Dirección IP proporcionada: %s\n", ip);
+        close(server_fd);
         return -1;
     }
 
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-
-    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
+    
     if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        printF("Error en el bind\n");
+        perror("[ERROR]: Error en bind");
         close(server_fd);
         return -1;
     }
 
     if (listen(server_fd, 5) < 0) {
-        printF("Error en el listen\n");
+        perror("[ERROR]: Error en listen");
         close(server_fd);
         return -1;
     }
 
     return server_fd;
 }
+
 
 // Acepta una conexión
 int accept_connection(int server_fd) {

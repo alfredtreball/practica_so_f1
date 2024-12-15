@@ -16,22 +16,37 @@ void calculate_md5(const char *filePath, char *md5Sum) {
     pid_t pid = fork();
     if (pid == 0) {
         // Proceso hijo: ejecuta md5sum y redirige la salida al pipe
-        close(pipe_fd[0]);
+        close(pipe_fd[0]); // Cerrar extremo de lectura
         dup2(pipe_fd[1], STDOUT_FILENO);
+        close(pipe_fd[1]); // Cerrar el descriptor duplicado
         execlp("md5sum", "md5sum", filePath, NULL);
-        _exit(1); // Si execlp falla
+        write(STDERR_FILENO, "Error ejecutando md5sum\n", 24);
+        _exit(1); // Salida con error si execlp falla
     } else if (pid > 0) {
         // Proceso padre: lee la salida de md5sum desde el pipe
-        close(pipe_fd[1]);
+        close(pipe_fd[1]); // Cerrar extremo de escritura
         char buffer[64] = {0};
-        read(pipe_fd[0], buffer, sizeof(buffer));
-        close(pipe_fd[0]);
+        ssize_t bytesRead = read(pipe_fd[0], buffer, sizeof(buffer) - 1);
+        close(pipe_fd[0]); // Cerrar el extremo de lectura
 
-        // Extraer el MD5SUM de la salida de md5sum
-        sscanf(buffer, "%32s", md5Sum);
+        if (bytesRead > 0) {
+            buffer[bytesRead] = '\0'; // Asegurar nulo-terminado
+            if (sscanf(buffer, "%32s", md5Sum) != 1) {
+                write(STDERR_FILENO, "Error procesando salida de md5sum\n", 34);
+                strcpy(md5Sum, "ERROR");
+            }
+        } else {
+            write(STDERR_FILENO, "Error leyendo salida de md5sum\n", 31);
+            strcpy(md5Sum, "ERROR");
+        }
+
         wait(NULL); // Esperar a que el proceso hijo termine
     } else {
+        // Error al crear el proceso hijo
         write(STDERR_FILENO, "Error creando proceso hijo para MD5\n", 36);
         strcpy(md5Sum, "ERROR");
+        close(pipe_fd[0]);
+        close(pipe_fd[1]);
     }
 }
+
