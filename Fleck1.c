@@ -489,11 +489,11 @@ void handleWorkerFailure(const char *mediaType, const char *fileName, int gotham
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
     logInfo("[INFO]: Enviando solicitud de reasignación de Worker a Gotham...");
-    send_frame(gothamSocket, &frame);
+    escribir_trama(gothamSocket, &frame);
 
     // Esperar respuesta de Gotham
     Frame response;
-    if (receive_frame(gothamSocket, &response) == 0) {
+    if (leer_trama(gothamSocket, &response) == 0) {
         if (response.type == 0x11) {
             if (strcmp(response.data, "DISTORT_KO") == 0) {
                 logError("[ERROR]: Gotham no pudo reasignar un Worker.");

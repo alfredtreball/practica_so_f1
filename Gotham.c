@@ -1,6 +1,6 @@
 /***********************************************
 * @Fitxer: Gotham.c
-* @Autors: Pau Olea Reyes (pau.olea), Alfred Chávez Fernández (alfred.chavez)
+* @Autors: Pau Olea Reyes (pau.olea), Alfred Chávez Fernández
 * @Estudis: Enginyeria Electrònica de Telecomunicacions
 * @Universitat: Universitat Ramon Llull - La Salle
 * @Assignatura: Sistemes Operatius
@@ -24,11 +24,11 @@
 #include <ctype.h>
 #include <signal.h>
 
+#include "GestorTramas/GestorTramas.h"
 #include "FileReader/FileReader.h"
 #include "StringUtils/StringUtils.h"
 #include "DataConversion/DataConversion.h"
 #include "Networking/Networking.h"
-#include "FrameUtils/FrameUtils.h"
 #include "Logging/Logging.h"
 
 volatile sig_atomic_t stop_server = 0; // Bandera para indicar el cierre
@@ -81,8 +81,6 @@ typedef struct {
 WorkerManager *workerManager = NULL;
 ClientManager *clientManager = NULL;
 
-// Declaració de funcions
-void mostrarCaratula();
 WorkerManager *createWorkerManager();
 void freeWorkerManager(WorkerManager *manager);
 void *gestionarConexion(void *arg);
@@ -99,20 +97,6 @@ void removeClientBySocket(ClientManager *manager, int socket_fd);
 void listClients(ClientManager *manager);
 void handleSigint(int sig);
 void alliberarMemoria(GothamConfig *gothamConfig);
-
-// Mostra una caràtula informativa al terminal
-void mostrarCaratula() {
-    printF(GREEN BOLD);
-    printF("###############################################\n");
-    printF("#                                             #\n");
-    printF("#       BENVINGUT AL SERVIDOR GOTHAM          #\n");
-    printF("#                                             #\n");
-    printF("#      Gestió de connexions amb Harley,       #\n");
-    printF("#        Enigma i Fleck Workers              #\n");
-    printF("#                                             #\n");
-    printF("###############################################\n\n");
-    printF(RESET);
-}
 
 // Crea un nou gestor de clients
 ClientManager *createClientManager() {
@@ -294,7 +278,7 @@ void registrarWorker(const char *payload, WorkerManager *manager, int client_fd)
         strncpy(response.data, "CON_KO", sizeof(response.data) - 1);
         response.data_length = strlen(response.data);
         response.checksum = calculate_checksum(response.data, response.data_length, 1);
-        send_frame(client_fd, &response);
+        escribirTrama(client_fd, &response);
         return;
     }
 
@@ -337,7 +321,7 @@ void registrarWorker(const char *payload, WorkerManager *manager, int client_fd)
     response.type = 0x02;
     response.data_length = 0;
     response.checksum = calculate_checksum(response.data, response.data_length, 1);
-    send_frame(client_fd, &response);
+    escribirTrama(client_fd, &response);
 }
 
 WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager) {
@@ -413,7 +397,7 @@ void asignarNuevoWorkerPrincipal(WorkerInfo *worker) {
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
     logInfo("[INFO]: Asignando nuevo Worker principal...");
-    if (send_frame(worker->socket_fd, &frame) == 0) {
+    if (escribirTrama(worker->socket_fd, &frame) == 0) {
         logSuccess("[SUCCESS]: Trama 0x08 enviada correctamente al Worker principal.");
     } else {
         logError("[ERROR]: Error enviando la trama 0x08 al Worker principal.");
@@ -512,8 +496,12 @@ void handleWorkerFailure(const char *mediaType, WorkerManager *manager, int clie
         strncpy(response.data, "DISTORT_KO", sizeof(response.data) - 1);
         response.data_length = strlen(response.data);
     }
+    response.timestamp = (uint32_t)time(NULL);
     response.checksum = calculate_checksum(response.data, response.data_length, 0);
-    send_frame(client_fd, &response);
+
+    if (escribirTrama(client_fd, &response) != 0) {
+        logError("[ERROR]: Error enviando la trama de reasignación al cliente.");
+    }
 }
 
 // Allibera la memòria utilitzada pel WorkerManager
@@ -528,7 +516,6 @@ void freeWorkerManager(WorkerManager *manager) {
     }
 }
 
-// Gestiona la connexió amb un client
 // Gestiona la connexió amb un client
 void *gestionarConexion(void *arg) {
     ConnectionArgs *args = (ConnectionArgs *)arg;
@@ -550,7 +537,7 @@ void *gestionarConexion(void *arg) {
     int disconnectHandled = 0;
 
     // Manejo de frames inicial
-    if (receive_frame(client_fd, &frame) != 0) {
+    if (leerTrama(client_fd, &frame) != 0) {
         logError("[ERROR]: Error al recibir el primer frame del cliente.");
         close(client_fd);
         return NULL;
@@ -560,7 +547,7 @@ void *gestionarConexion(void *arg) {
 
     // Bucle principal para manejar los frames del cliente
     while (!stop_server) { // Verifica la bandera global para el cierre del servidor
-        if (receive_frame(client_fd, &frame) != 0) {
+        if (leerTrama(client_fd, &frame) != 0) {
             logInfo("[INFO]: El cliente cerró la conexión o hubo un error.");
             break;
         }
@@ -640,7 +627,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
                 strncpy(response.data, "CON_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
                 response.checksum = calculate_checksum(response.data, response.data_length, 0);
-                send_frame(client_fd, &response);
+                escribirTrama(client_fd, &response);
                 break;
             }
 
@@ -658,7 +645,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             response.data[0] = '\0'; // Configurar datos como vacío
             response.data_length = 0; // Longitud de datos = 0
             response.checksum = calculate_checksum(response.data, response.data_length, 0);
-            send_frame(client_fd, &response);
+            escribirTrama(client_fd, &response);
             break;
 
         case 0x02: // REGISTER
@@ -678,7 +665,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             strncpy(response.data, "DISCONNECT_OK", sizeof(response.data) - 1);
             response.data_length = strlen(response.data);
             response.checksum = calculate_checksum(response.data, response.data_length, 0);
-            send_frame(client_fd, &response);
+            escribirTrama(client_fd, &response);
 
             close(client_fd);
             break;
@@ -694,7 +681,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
                 strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
                 response.checksum = calculate_checksum(response.data, response.data_length, 0);
-                send_frame(client_fd, &response);
+                escribirTrama(client_fd, &response);
                 break;
             }
 
@@ -709,7 +696,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
                 strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
                 response.checksum = calculate_checksum(response.data, response.data_length, 0);
-                send_frame(client_fd, &response);
+                escribirTrama(client_fd, &response);
                 break;
             }
 
@@ -741,7 +728,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             response.type = 0x10;
             response.data_length = strlen(response.data);
             response.checksum = calculate_checksum(response.data, response.data_length, 0);
-            send_frame(client_fd, &response);
+            escribirTrama(client_fd, &response);
             break;
 
         case 0x11: //REASINGAR WORKER
@@ -756,7 +743,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
                 strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
                 response.checksum = calculate_checksum(response.data, response.data_length, 0);
-                send_frame(client_fd, &response);
+                escribirTrama(client_fd, &response);
                 break;
             }
 
@@ -773,7 +760,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
                 strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
                 response.checksum = calculate_checksum(response.data, response.data_length, 0);
-                send_frame(client_fd, &response);
+                escribirTrama(client_fd, &response);
                 break;
             }
 
@@ -785,7 +772,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
                 strncpy(response.data, "DISTORT_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
                 response.checksum = calculate_checksum(response.data, response.data_length, 0);
-                send_frame(client_fd, &response);
+                escribirTrama(client_fd, &response);
                 break;
             }
 
@@ -798,16 +785,12 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             response.checksum = calculate_checksum(response.data, response.data_length, 0);
 
             logInfo("[INFO]: Enviando información del Worker reasignado...\n");
-            send_frame(client_fd, &response);
+            escribirTrama(client_fd, &response);
             break;
 
         default: // Comanda desconeguda
             logError("Comanda desconeguda rebuda.\n");
-            response.type = 0xFF; // ERROR del comandament desconegut
-            strncpy(response.data, "CMD_KO", sizeof(response.data) - 1);
-            response.data_length = strlen(response.data);
-            response.checksum = calculate_checksum(response.data, response.data_length, 0);
-            send_frame(client_fd, &response);
+            enviarTramaError(client_fd);
             break;
     }
 }
@@ -924,8 +907,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Uso: ./gotham <archivo de configuración>\n");
         return EXIT_FAILURE;
     }
-
-    mostrarCaratula();
 
     GothamConfig *config = malloc(sizeof(GothamConfig));
     global_config = config; // Asignar el puntero global

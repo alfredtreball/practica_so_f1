@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <pthread.h>
 
+#include "GestorTramas/GestorTramas.h"
 #include "FileReader/FileReader.h"
 #include "StringUtils/StringUtils.h"
 #include "DataConversion/DataConversion.h"
@@ -25,6 +26,7 @@
 #define CHECKSUM_MODULO 65536
 #define FILE_PATH "fitxers_prova/"
 #define DATA_SIZE 247
+#define SEGONA_PART_ENVIAMENT 50
 
 typedef struct {
     int workerSocket;
@@ -45,7 +47,7 @@ void alliberarMemoria(FleckConfig *fleckConfig);
 void handleWorkerFailure(const char *mediaType, const char *fileName, int gothamSocket);
 void sendFileToWorker(int workerSocket, const char *fileName);
 void *sendFileChunks(void *args);
-void sendDistortFileRequest(int workerSocket, const char *fileName, off_t fileSize);
+void sendDistortFileRequest(int workerSocket, const char *fileName, off_t fileSize, const char *md5Sum, const char *factor);
 void sendDisconnectFrameToGotham(const char *userName);
 void sendDisconnectFrameToWorker(int workerSocket, const char *userName);
 void processCommand(char *command, int gothamSocket, int workerSocket);
@@ -238,6 +240,8 @@ void processCommandWithGotham(const char *command) {
         uint16_t resp_checksum = calculate_checksum(response.data, response.data_length, 1);
         if (resp_checksum != response.checksum) {
             printColor(ANSI_COLOR_RED, "[ERROR]: Respuesta de Gotham con checksum inválido\n");
+            close(gothamSocket);
+            gothamSocket = -1;
             return;
         }
 
@@ -328,6 +332,51 @@ void processCommand(char *command, int gothamSocket, int workerSocket) {
 //FLECK  ENVIA 0X05 AMB LES DADES Y WORKER RESPON 0X04 AMB FILESIZE Y MD5SUM QUAN ACABI D'ENVIAR TOT L'ARXIU DISTORSIONAT
 //PERCENTATGE PER CHECK STATUS, ÉS DOBLE OSEA QUE AL ENVIAR Y RECIBIR VA POR LADO
 //TODO QUAN PASSEM FITXERS BINARIS, FER UNA FUNCIÓ AMB LA TRAMA SHIFTEJANT, SINÓ DONARÀ PROBLEMES AL REBRE I PROBAR AL ENVIAR
+//ESCOLTEM TRAMES UN COP ENVIEM L'ARXIU A HARLEY
+void *listenToHarley(void *arg) {
+    int workerSocket = *(int *)arg;
+
+    Frame response;
+    while (1) {
+        // Leer las tramas que envía Harley
+        if (leerTrama(workerSocket, &response) != 0) {
+            logWarning("[WARNING]: Error al leer trama de Harley o conexión cerrada.");
+            break;
+        }
+
+        switch (response.type) {
+            case 0x04: { // Trama con información del archivo distorsionado
+                char fileSizeStr[20];
+                char md5Sum[33];
+
+                if (sscanf(response.data, "%19[^&]&%32s", fileSizeStr, md5Sum) != 2) {
+                    logError("[ERROR]: Trama 0x04 de Harley con formato inválido.");
+                    break;
+                }
+
+                logInfo("[INFO]: Archivo distorsionado recibido:");
+                logInfo("[INFO]: Tamaño del archivo distorsionado:");
+                logInfo(fileSizeStr);
+                logInfo("[INFO]: MD5 del archivo distorsionado:");
+                logInfo(md5Sum);
+                break;
+            }
+
+            case 0x06: { // Respuesta de verificación MD5 o cualquier otra confirmación
+                logInfo("[INFO]: Respuesta 0x06 recibida de Harley:");
+                logInfo(response.data);
+                break;
+            }
+
+            default:
+                logWarning("[WARNING]: Trama desconocida recibida de Harley.");
+                break;
+        }
+    }
+
+    logInfo("[INFO]: Finalizando escucha de Harley.");
+    return NULL;
+}
 
 //LLancem thread per iniciar un nou fil que envïi la trama 0x05 amb longitud data 247 per parts.
 void *sendFileChunks(void *args) {
@@ -358,13 +407,13 @@ void *sendFileChunks(void *args) {
         frame.timestamp = (uint32_t)time(NULL);
         frame.checksum = calculate_checksum_binary(frame.data, frame.data_length, 1);
 
-        if (send_frame_binary(workerSocket, &frame) < 0) {
+        if (escribirTramaBinaria(workerSocket, &frame) < 0) {
             logError("[ERROR]: Fallo al enviar trama 0x05.");
             close(fd);
             return NULL;
         }
         usleep(1000);
-        statusResult = (((DATA_SIZE*status)*100)/fileSize)/2;
+        statusResult = (((DATA_SIZE * status) * 100) / fileSize) / 2;
         status++;
     }
 
@@ -373,33 +422,87 @@ void *sendFileChunks(void *args) {
     } else {
         logInfo("[INFO]: Envío del archivo completado.");
     }
-
     close(fd);
 
-    // Enviar trama 0x06 para indicar fin del envío
-    Frame endFrame = {0};
-    endFrame.type = 0x06;
-    snprintf(endFrame.data, sizeof(endFrame.data), "END_OF_FILE");
-    endFrame.data_length = strlen(endFrame.data);
-    endFrame.timestamp = (uint32_t)time(NULL);
-    endFrame.checksum = calculate_checksum(endFrame.data, endFrame.data_length, 1);
-
-    if (send_frame(workerSocket, &endFrame) < 0) {
-        logError("[ERROR]: Fallo al enviar trama de fin de archivo (0x06).");
-    } else {
-        logInfo("[INFO]: Trama 0x06 enviada al Worker.");
+    // Iniciar thread para escuchar respuestas de Harley
+    pthread_t listenThread;
+    int *socketArg = malloc(sizeof(int));
+    if (socketArg == NULL) {
+        logError("[ERROR]: No se pudo asignar memoria para el thread de escucha.");
+        return NULL;
     }
+    *socketArg = workerSocket;
+
+    if (pthread_create(&listenThread, NULL, listenToHarley, (void *)socketArg) != 0) {
+        logError("[ERROR]: No se pudo crear el thread para escuchar respuestas de Harley.");
+        free(socketArg);
+        return NULL;
+    }
+
+    pthread_detach(listenThread); // Liberar automáticamente el hilo al finalizar
+    logInfo("[INFO]: Hilo iniciado para escuchar respuestas de Harley.");
 
     return NULL;
 }
 
-void sendDistortFileRequest(int workerSocket, const char *fileName, off_t fileSize) {
+void sendMD5Response(int harleySocket, const char *status) {
+    Frame response = {0};
+    response.type = 0x06; // Tipo de trama para respuesta MD5
+    strncpy(response.data, status, sizeof(response.data) - 1);
+    response.data_length = strlen(response.data);
+    response.timestamp = (uint32_t)time(NULL);
+    response.checksum = calculate_checksum(response.data, response.data_length, 1);
+
+    logInfo("[INFO]: Enviando respuesta de MD5 a Harley.");
+    if (escribirTrama(harleySocket, &response) < 0) {
+        logError("[ERROR]: Error al enviar la respuesta MD5.");
+    }
+}
+
+void sendDistortFileRequest(int workerSocket, const char *fileName, off_t fileSize, const char *md5Sum, const char *factor) {
     char *filePath = NULL;
     if (asprintf(&filePath, "%s%s", FILE_PATH, fileName) == -1) {
         logError("[ERROR]: No se pudo asignar memoria para el path del archivo.");
         return;
     }
 
+    // Enviar trama inicial de DISTORT FILE (0x03)
+    Frame frame = {0};
+    snprintf(frame.data, sizeof(frame.data), "%s&%s&%ld&%s&%s", 
+             globalFleckConfig->user, fileName, fileSize, md5Sum, factor);
+    frame.type = 0x03;
+    frame.data_length = strlen(frame.data);
+    frame.timestamp = (uint32_t)time(NULL);
+    frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
+
+    logInfo("[INFO]: Enviando solicitud DISTORT FILE (0x03) a Worker.");
+    if (escribirTrama(workerSocket, &frame) < 0) {
+        logError("[ERROR]: Error al enviar solicitud DISTORT FILE.");
+        free(filePath);
+        return;
+    }
+
+    // Esperar respuesta de Harley
+    Frame response = {0};
+    if (leerTrama(workerSocket, &response) != 0 || response.type != 0x03) {
+        logError("[ERROR]: No se recibió confirmación de conexión del Worker.");
+        free(filePath);
+        return;
+    }
+
+    if (response.data_length == 0) {
+        logInfo("[INFO]: Worker listo para recibir el archivo. Iniciando envío...");
+    } else if (strcmp(response.data, "CON_KO") == 0) {
+        logError("[ERROR]: Worker rechazó la conexión.");
+        free(filePath);
+        return;
+    } else {
+        logError("[ERROR]: Respuesta inesperada del Worker.");
+        free(filePath);
+        return;
+    }
+
+    // Preparar hilo para enviar las tramas 0x05
     DistortRequestArgs *args = malloc(sizeof(DistortRequestArgs));
     if (!args) {
         logError("[ERROR]: No se pudo asignar memoria para los argumentos del thread.");
@@ -419,9 +522,10 @@ void sendDistortFileRequest(int workerSocket, const char *fileName, off_t fileSi
         return;
     }
 
-    pthread_detach(thread); // No necesitamos esperar explícitamente a que el thread termine
+    pthread_detach(thread); // Liberar el hilo automáticamente
     logInfo("[INFO]: Thread iniciado para enviar el archivo.");
 }
+
 
 void handleWorkerFailure(const char *mediaType, const char *fileName, int gothamSocket) {
     Frame frame = {0};
@@ -432,11 +536,11 @@ void handleWorkerFailure(const char *mediaType, const char *fileName, int gotham
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
     logInfo("[INFO]: Enviando solicitud de reasignación de Worker a Gotham...");
-    send_frame(gothamSocket, &frame);
+    escribirTrama(gothamSocket, &frame);
 
     // Esperar respuesta de Gotham
     Frame response;
-    if (receive_frame(gothamSocket, &response) == 0) {
+    if (leerTrama(gothamSocket, &response) == 0) {
         if (response.type == 0x11) {
             if (strcmp(response.data, "DISTORT_KO") == 0) {
                 logError("[ERROR]: Gotham no pudo reasignar un Worker.");
@@ -471,7 +575,7 @@ void handleWorkerFailure(const char *mediaType, const char *fileName, int gotham
 
 void processDistortFileCommand(const char *fileName, const char *factor, int gothamSocket) {
     if (!fileName || !factor) {
-        logError("[ERROR]: DISTORT command requires a mediaType and a fileName.");
+        logError("[ERROR]: DISTORT command requires a FileName and a Factor.");
         return;
     }
 
@@ -499,44 +603,37 @@ void processDistortFileCommand(const char *fileName, const char *factor, int got
         return;
     }
 
-    // Calcular el tamaño del archivo con lseek
-    int fd_media = open(filePath, O_RDONLY);
-    if (fd_media < 0) {
+    // Calcular el tamaño del archivo
+    int fd = open(filePath, O_RDONLY);
+    if (fd < 0) {
         logError("[ERROR]: No se pudo abrir el archivo especificado.");
-        free(filePath);  // Liberar memoria asignada dinámicamente
+        free(filePath);
         return;
     }
 
-    off_t fileSize = lseek(fd_media, 0, SEEK_END);
+    off_t fileSize = lseek(fd, 0, SEEK_END);
     if (fileSize < 0) {
         logError("[ERROR]: No se pudo calcular el tamaño del archivo.");
-        close(fd_media);
+        close(fd);
         free(filePath);
         return;
     }
-    lseek(fd_media, 0, SEEK_SET);  // Regresar al inicio del archivo para su posterior lectura
-    close(fd_media);
-
-    // Convertir tamaño del archivo a string
-    char *fileSizeStr = NULL;
-    if (asprintf(&fileSizeStr, "%ld", fileSize) == -1) {
-        logError("[ERROR]: No se pudo asignar memoria para el tamaño del archivo.");
-        free(filePath);
-        return;
-    }
-
-    logInfo("\n[INFO]: Path del archivo:");
-    logInfo(filePath);
-
-    logInfo("\n[INFO]: Tamaño del archivo calculado:");
-    logInfo(fileSizeStr);
+    close(fd);
 
     // Calcular el MD5 del archivo
-    char md5sum[33] = {0};
-    calculate_md5(filePath, md5sum);
+    char md5Sum[33] = {0};
+    calculate_md5(filePath, md5Sum);
 
-    logInfo("\n[INFO]: MD5 calculado:");
-    logInfo(md5sum);
+    logInfo("[INFO]: Path del archivo:");
+    logInfo(filePath);
+
+    logInfo("[INFO]: Tamaño del archivo calculado:");
+    char fileSizeStr[20];
+    snprintf(fileSizeStr, sizeof(fileSizeStr), "%ld", fileSize);
+    logInfo(fileSizeStr);
+
+    logInfo("[INFO]: MD5 calculado:");
+    logInfo(md5Sum);
 
     // Enviar solicitud DISTORT a Gotham
     Frame frame = {0};
@@ -547,26 +644,23 @@ void processDistortFileCommand(const char *fileName, const char *factor, int got
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
     logInfo("[INFO]: Enviando solicitud DISTORT a Gotham...");
-    send_frame(gothamSocket, &frame);
+    escribirTrama(gothamSocket, &frame);
 
     // Recibir respuesta de Gotham
     Frame response = {0};
-    if (receive_frame(gothamSocket, &response) != 0 || response.type != 0x10) {
+    if (leerTrama(gothamSocket, &response) != 0 || response.type != 0x10) {
         logError("[ERROR]: No se recibió respuesta válida de Gotham.");
         free(filePath);
-        free(fileSizeStr);
         return;
     }
 
     if (strcmp(response.data, "DISTORT_KO") == 0) {
-        logError("[ERROR]: Gotham no encontró un worker disponible.");
+        logError("[ERROR]: Gotham no encontró un Worker disponible.");
         free(filePath);
-        free(fileSizeStr);
         return;
     } else if (strcmp(response.data, "MEDIA_KO") == 0) {
         logError("[ERROR]: Tipo de archivo rechazado por Gotham.");
         free(filePath);
-        free(fileSizeStr);
         return;
     }
 
@@ -576,49 +670,21 @@ void processDistortFileCommand(const char *fileName, const char *factor, int got
     if (sscanf(response.data, "%15[^&]&%d", workerIp, &workerPort) != 2 || strlen(workerIp) == 0 || workerPort <= 0) {
         logError("[ERROR]: Datos del Worker inválidos.");
         free(filePath);
-        free(fileSizeStr);
         return;
     }
 
-    int workerSocket = connect_to_server(workerIp, workerPort);
+    workerSocket = connect_to_server(workerIp, workerPort);
     if (workerSocket < 0) {
         logError("[ERROR]: No se pudo conectar al Worker.");
         free(filePath);
-        free(fileSizeStr);
         return;
     }
 
-    // Enviar trama 0x03 con tamaño y MD5
-    snprintf(frame.data, sizeof(frame.data), "%s&%s&%s&%s&%s", 
-             globalFleckConfig->user, fileName, fileSizeStr, md5sum, factor);
-    frame.type = 0x03;
-    frame.data_length = strlen(frame.data);
-    frame.timestamp = (uint32_t)time(NULL);
-    frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
-
-    logInfo("[DEBUG]: Trama enviada a Harley:");
-    logInfo(frame.data);
-
-    logInfo("[INFO]: Enviando solicitud DISTORT FILE al Worker...");
-    send_frame(workerSocket, &frame);
-
-    // Manejar respuesta del Worker
-    Frame workerResponse = {0};
-    if (receive_frame(workerSocket, &workerResponse) == 0 && workerResponse.type == 0x03) {
-        if (workerResponse.data_length == 0) {
-            logSuccess("[SUCCESS]: Worker listo para recibir.");
-            sendDistortFileRequest(workerSocket, fileName, fileSize);
-        } else {
-            logError("[ERROR]: Worker rechazó la solicitud.");
-        }
-    } else {
-        logError("[ERROR]: Respuesta inesperada del Worker.");
-    }
+    // Enviar solicitud DISTORT FILE al Worker
+    sendDistortFileRequest(workerSocket, fileName, fileSize, md5Sum, factor);
 
     free(filePath);
-    free(fileSizeStr);
 }
-
 
 void sendDisconnectFrameToGotham(const char *userName) {
     Frame frame = {0};
@@ -635,7 +701,7 @@ void sendDisconnectFrameToGotham(const char *userName) {
     
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
-    if (send_frame(gothamSocket, &frame) < 0) {
+    if (escribirTrama(gothamSocket, &frame) < 0) {
         logError("[ERROR]: Fallo al enviar trama de desconexión a Gotham.");
     } else {
         logInfo("[INFO]: Trama de desconexión enviada correctamente a Gotham.");
@@ -658,7 +724,7 @@ void sendDisconnectFrameToWorker(int workerSocket, const char *userName) {
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
     logInfo("[INFO]: Enviando trama de desconexión al Worker...");
-    if (send_frame(workerSocket, &frame) < 0) {
+    if (escribirTrama(workerSocket, &frame) < 0) {
         logError("[ERROR]: Fallo al enviar trama de desconexión al Worker.");
     } else {
         logInfo("[INFO]: Trama de desconexión enviada correctamente al Worker.");

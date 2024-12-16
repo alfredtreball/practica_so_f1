@@ -11,6 +11,7 @@
 #include <sys/stat.h>  // Para stat y mkdir
 #include <sys/types.h> // Para stat y mkdir
 
+#include "GestorTramas/GestorTramas.h"
 #include "FileReader/FileReader.h"
 #include "StringUtils/StringUtils.h"
 #include "Networking/Networking.h"
@@ -28,12 +29,24 @@
 void *handleFleckFrames(void *arg);
 void processReceivedFrameFromFleck(int clientSocket, const Frame *request);
 void processReceivedFrame(int gothamSocket, const Frame *response);
-void processBinaryFrameFromFleck(BinaryFrame *binaryFrame);
+void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSize, size_t *currentFileSize, int clientSocket);
+void enviaTramaArxiuDistorsionat(int clientSocket, const char *fileSizeCompressed, const char *compressedMD5);
+void send_frame_with_error(int clientSocket, const char *errorMessage);
+void send_frame_with_ok(int clientSocket);
+void sendMD5Response(int clientSocket, const char *status);
 
 HarleyConfig *globalharleyConfig = NULL;
 
 // Variable global para el socket
 int gothamSocket = -1;
+float resultStatus;
+
+// Estructura para los argumentos del hilo
+typedef struct {
+    int clientSocket;
+    char *filePath;
+    off_t fileSize;
+} SendCompressedFileArgs;
 
 char receivedFileName[256] = {0}; // Nombre del archivo recibido
 int tempFileDescriptor = -1;      // Descriptor del archivo temporal
@@ -50,7 +63,7 @@ void sendDisconnectFrameToGotham(const char *mediaType)
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
     logInfo("[INFO]: Enviando trama de desconexión a Gotham...");
-    send_frame(gothamSocket, &frame);
+    escribirTrama(gothamSocket, &frame);
 }
 
 // Función para manejar señales como SIGINT
@@ -81,7 +94,7 @@ void *handleGothamFrames(void *arg)
     int gothamSocket = *(int *)arg;
 
     Frame frame;
-    while (receive_frame(gothamSocket, &frame) == 0)
+    while (leerTrama(gothamSocket, &frame) == 0)
     {
         processReceivedFrame(gothamSocket, &frame);
     }
@@ -102,51 +115,127 @@ int receive_frame_header(int clientSocket, Frame *header)
     return 0;
 }
 
-void *handleFleckFrames(void *arg)
-{
+void *handleFleckFrames(void *arg) {
     int clientSocket = *(int *)arg;
 
-    while (1)
-    {
+    size_t expectedFileSize = 0;   // Tamaño esperado del archivo (de la trama 0x03)
+    size_t currentFileSize = 0;    // Tamaño recibido hasta el momento
+
+    while (1) {
         Frame header;
-        if (receive_frame_header(clientSocket, &header) != 0)
-        {
+
+        // Leer encabezado y manejar errores de desconexión
+        if (receive_frame_header(clientSocket, &header) != 0) {
             logWarning("[WARNING]: Conexión cerrada por Fleck o error al leer la cabecera.");
             break;
         }
 
-        if (header.type == 0x05)
-        {
-            // Manejo de trama binaria
+        // Procesar trama binaria 0x05
+        if (header.type == 0x05) {
             BinaryFrame binaryFrame;
-            if (receive_frame_binary(clientSocket, &binaryFrame) == 0)
-            {
-                processBinaryFrameFromFleck(&binaryFrame);
-            }
-            else
-            {
+            if (leerTramaBinaria(clientSocket, &binaryFrame) == 0) {
+                processBinaryFrameFromFleck(&binaryFrame, expectedFileSize, &currentFileSize, clientSocket);
+            } else {
                 logError("[ERROR]: Error al recibir trama binaria.");
                 break;
             }
-        }
-        else
-        {
-            // Manejo de tramas no binarias
+        } else { // Procesar tramas no binarias
             Frame request;
-            if (receive_frame(clientSocket, &request) == 0)
-            {
-                processReceivedFrameFromFleck(clientSocket, &request);
-            }
-            else
-            {
+            if (leerTrama(clientSocket, &request) == 0) {
+                // Procesar trama 0x03
+                if (request.type == 0x03) {
+                    logInfo("[INFO]: Solicitud DISTORT FILE recibida.");
+                    char userName[64], fileName[256], fileSizeStr[20], md5Sum[33], factor[20];
+                    if (sscanf(request.data, "%63[^&]&%255[^&]&%19[^&]&%32[^&]&%19s",
+                            userName, fileName, fileSizeStr, md5Sum, factor) != 5) {
+                        logError("[ERROR]: Formato inválido en solicitud DISTORT FILE.");
+                        send_frame_with_error(clientSocket, "CON_KO");
+                        break;
+                    }
+
+                    // Guardar metadatos globales
+                    strncpy(receivedFileName, fileName, sizeof(receivedFileName) - 1);
+                    strncpy(expectedMD5, md5Sum, sizeof(expectedMD5) - 1);
+                    strncpy(receivedFactor, factor, sizeof(receivedFactor) - 1);
+
+                    // Validar tamaño del archivo
+                    expectedFileSize = strtoull(fileSizeStr, NULL, 10);
+                    if (expectedFileSize == 0) {
+                        logError("[ERROR]: Tamaño del archivo inválido.");
+                        send_frame_with_error(clientSocket, "CON_KO");
+                        break;
+                    }
+
+                    // Crear archivo en HARLEY_PATH_FILES
+                    char finalFilePath[512];
+                    snprintf(finalFilePath, sizeof(finalFilePath), "%s%s", HARLEY_PATH_FILES, receivedFileName);
+                    tempFileDescriptor = open(finalFilePath, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+
+                    if (tempFileDescriptor < 0) {
+                        logError("[ERROR]: No se pudo crear el archivo en HARLEY_PATH_FILES.");
+                        perror("Error al abrir el archivo");
+                        break;
+                    }
+
+                    logInfo("[INFO]: Archivo temporal creado correctamente:");
+                    logInfo(finalFilePath);
+
+                    // Responder a Fleck con OK
+                    send_frame_with_ok(clientSocket);
+                }
+            } else {
                 logWarning("[WARNING]: Error al recibir trama estándar.");
                 break;
             }
         }
     }
 
-    logInfo("[INFO]: Cerrando conexión del cliente Fleck.");
-    close(clientSocket);
+    return NULL;
+}
+
+// Función para enviar el archivo comprimido en tramas binarias
+void *sendCompressedFileToFleck(void *args) {
+    SendCompressedFileArgs *sendArgs = (SendCompressedFileArgs *)args;
+    int clientSocket = sendArgs->clientSocket;
+    const char *filePath = sendArgs->filePath;
+    free(sendArgs); // Liberar memoria de los argumentos
+
+    int fd = open(filePath, O_RDONLY, 0666);
+    if (fd < 0) {
+        logError("[ERROR]: No se pudo abrir el archivo comprimido.");
+        return NULL;
+    }
+
+    BinaryFrame frame = {0};
+    frame.type = 0x05; // Tipo de trama binaria
+
+    char buffer[247]; // Máxima longitud permitida para DATA
+    ssize_t bytesRead;
+
+    logInfo("[INFO]: Iniciando envío del archivo comprimido por tramas 0x05...");
+
+    while ((bytesRead = read(fd, buffer, sizeof(buffer))) > 0) {
+        frame.data_length = bytesRead;
+        memcpy(frame.data, buffer, bytesRead);
+        frame.timestamp = (uint32_t)time(NULL);
+        frame.checksum = calculate_checksum_binary(frame.data, frame.data_length, 1);
+
+        if (escribirTramaBinaria(clientSocket, &frame) < 0) {
+            logError("[ERROR]: Fallo al enviar trama 0x05.");
+            close(fd);
+            return NULL;
+        }
+
+        usleep(1000); // Pausa para evitar congestión
+    }
+
+    if (bytesRead < 0) {
+        logError("[ERROR]: Fallo al leer el archivo comprimido.");
+    } else {
+        logInfo("[INFO]: Envío del archivo comprimido completado.");
+    }
+
+    close(fd);
     return NULL;
 }
 
@@ -160,7 +249,7 @@ void send_frame_with_error(int clientSocket, const char *errorMessage)
     errorFrame.checksum = calculate_checksum(errorFrame.data, errorFrame.data_length, 0);
 
     logInfo("[INFO]: Enviando trama de error al cliente.");
-    if (send_frame(clientSocket, &errorFrame) < 0)
+    if (escribirTrama(clientSocket, &errorFrame) < 0)
     {
         logError("[ERROR]: Error al enviar trama de error.");
     }
@@ -175,116 +264,40 @@ void send_frame_with_ok(int clientSocket)
     okFrame.checksum = calculate_checksum(okFrame.data, okFrame.data_length, 0);
 
     logInfo("[INFO]: Enviando trama de confirmación OK al cliente.");
-    if (send_frame(clientSocket, &okFrame) < 0)
+    if (escribirTrama(clientSocket, &okFrame) < 0)
     {
         logError("[ERROR]: Error al enviar trama de confirmación.");
     }
 }
 
-void processBinaryFrameFromFleck(BinaryFrame *binaryFrame)
-{
-    if (!binaryFrame)
-    {
+void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSize, size_t *currentFileSize, int clientSocket) {
+    if (!binaryFrame) {
         logError("[ERROR]: BinaryFrame recibido nulo.");
         return;
     }
 
-    if (tempFileDescriptor < 0)
-    {
+    if (tempFileDescriptor < 0) {
         logError("[ERROR]: No hay un archivo temporal abierto para escribir.");
         return;
     }
 
     // Escribir los datos en el archivo temporal
-    if (write(tempFileDescriptor, binaryFrame->data, binaryFrame->data_length) != binaryFrame->data_length)
-    {
+    if (write(tempFileDescriptor, binaryFrame->data, binaryFrame->data_length) != binaryFrame->data_length) {
         logError("[ERROR]: Error al escribir en el archivo temporal.");
-        return;
-    }
-}
-
-void sendMD5Response(int clientSocket, const char *status)
-{
-    Frame response = {0};
-    response.type = 0x06; // Tipo de trama para la respuesta MD5
-    strncpy(response.data, status, sizeof(response.data) - 1);
-    response.data_length = strlen(response.data);
-    response.timestamp = (uint32_t)time(NULL);
-    response.checksum = calculate_checksum(response.data, response.data_length, 1);
-
-    if (send_frame(clientSocket, &response) < 0)
-    {
-        logError("[ERROR]: Error al enviar la respuesta MD5 al cliente.");
-    }
-    else
-    {
-        logInfo("[INFO]: Respuesta MD5 enviada al cliente.");
-    }
-}
-
-void processReceivedFrameFromFleck(int clientSocket, const Frame *request)
-{
-    if (!request)
-    {
-        logError("[ERROR]: Frame recibido nulo.");
+        close(tempFileDescriptor);
+        tempFileDescriptor = -1;
         return;
     }
 
-    switch (request->type)
-    {
-    case 0x03:
-    { // Solicitud DISTORT FILE
-        logInfo("[INFO]: Solicitud DISTORT FILE recibida.");
-        char userName[64], fileName[256], fileSizeStr[20], md5Sum[33], factor[20];
-        if (sscanf(request->data, "%63[^&]&%255[^&]&%19[^&]&%32[^&]&%19s",
-                   userName, fileName, fileSizeStr, md5Sum, factor) != 5)
-        {
-            logError("[ERROR]: Formato inválido en solicitud DISTORT FILE.");
-            send_frame_with_error(clientSocket, "CON_KO");
-            return;
-        }
+    *currentFileSize += binaryFrame->data_length;
 
-        strncpy(receivedFileName, fileName, sizeof(receivedFileName) - 1);
-        receivedFileName[sizeof(receivedFileName) - 1] = '\0';
-        strncpy(expectedMD5, md5Sum, sizeof(expectedMD5) - 1);
-        strncpy(receivedFactor, factor, sizeof(receivedFactor) - 1);
+    // Verificar si se recibió el archivo completo
+    if (*currentFileSize >= expectedFileSize) {
+        logInfo("[INFO]: Archivo completo recibido. Procesando...");
 
-        size_t expectedFileSize = strtoull(fileSizeStr, NULL, 10);
-        if (expectedFileSize == 0)
-        {
-            logError("[ERROR]: Error al convertir el tamaño del archivo a número.");
-            return;
-        }
-        // Crear el archivo directamente en HARLEY_PATH_FILES
-        char finalFilePath[512];
-        snprintf(finalFilePath, sizeof(finalFilePath), "%s%s", HARLEY_PATH_FILES, receivedFileName);
-        tempFileDescriptor = open(finalFilePath, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-
-        if (tempFileDescriptor < 0)
-        {
-            logError("[ERROR]: No se pudo crear el archivo en HARLEY_PATH_FILES.");
-            perror("Error al abrir el archivo");
-            send_frame_with_error(clientSocket, "FILE_ERROR");
-            return;
-        }
-
-        logInfo("[INFO]: Archivo debería estar guardado en:");
-        logInfo(finalFilePath);
-
-        send_frame_with_ok(clientSocket);
-        break;
-    }
-
-    case 0x06:
-    { // Fin de envío de archivo
-        logInfo("[INFO]: Trama 0x06 recibida. Fin de envío de archivo por parte de Fleck. Verificando MD5...");
-
-        // Cierra el archivo temporal
-        if (tempFileDescriptor >= 0)
-        {
-            close(tempFileDescriptor);
-            tempFileDescriptor = -1;
-        }
+        // Cerrar el archivo temporal
+        close(tempFileDescriptor);
+        tempFileDescriptor = -1;
 
         char finalFilePath[512];
         snprintf(finalFilePath, sizeof(finalFilePath), "%s%s", HARLEY_PATH_FILES, receivedFileName);
@@ -292,76 +305,67 @@ void processReceivedFrameFromFleck(int clientSocket, const Frame *request)
         char calculatedMD5[33] = {0};
         calculate_md5(finalFilePath, calculatedMD5);
 
-        if (strcmp(calculatedMD5, "ERROR") == 0)
-        {
+        if (strcmp(calculatedMD5, "ERROR") == 0) {
             logError("[ERROR]: No se pudo calcular el MD5 del archivo recibido.");
             send_frame_with_error(clientSocket, "CHECK_KO");
             unlink(finalFilePath); // Eliminar el archivo en caso de error
-            break;
+            return;
         }
 
         logInfo("[INFO]: MD5 calculado del archivo recibido:");
         logInfo(calculatedMD5);
 
-        if (strcmp(expectedMD5, calculatedMD5) == 0)
-        {
+        if (strcmp(expectedMD5, calculatedMD5) == 0) {
             logInfo("[SUCCESS]: El MD5 coincide. Procesando compresión...");
-
+            sendMD5Response(clientSocket, "CHECK_OK");
             // Procesar la compresión
             int result = process_compression(finalFilePath, atoi(receivedFactor));
-            if (result != 0)
-            {
+            if (result != 0) {
                 logError("[ERROR]: Fallo en la compresión del archivo.");
-                break;
+                return;
             }
 
             // Crear la ruta del archivo comprimido dinámicamente
             char *compressedFilePath = NULL;
-            if (asprintf(&compressedFilePath, "%s", finalFilePath) == -1)
-            {
+            if (asprintf(&compressedFilePath, "%s", finalFilePath) == -1) {
                 logError("[ERROR]: No se pudo asignar memoria para la ruta del archivo comprimido.");
-                break;
+                return;
             }
 
             // Calcular el MD5 del archivo comprimido
             char compressedMD5[33] = {0};
             calculate_md5(compressedFilePath, compressedMD5);
 
-            if (strcmp(compressedMD5, "ERROR") == 0)
-            {
+            if (strcmp(compressedMD5, "ERROR") == 0) {
                 logError("[ERROR]: No se pudo calcular el MD5 del archivo comprimido.");
                 unlink(compressedFilePath); // Eliminar el archivo comprimido
                 free(compressedFilePath);
-                break;
+                return;
             }
 
             logInfo("[INFO]: MD5 calculado del archivo comprimido:");
             logInfo(compressedMD5);
 
-            // Calcular el tamaño del archivo comprimido con lseek
+            // Calcular el tamaño del archivo comprimido
             int fd_media_compressed = open(compressedFilePath, O_RDONLY);
-            if (fd_media_compressed < 0)
-            {
+            if (fd_media_compressed < 0) {
                 logError("[ERROR]: No se pudo abrir el archivo especificado.");
                 free(compressedFilePath);
                 return;
             }
 
             off_t fileSizeCompressed = lseek(fd_media_compressed, 0, SEEK_END);
-            if (fileSizeCompressed < 0)
-            {
+            if (fileSizeCompressed < 0) {
                 logError("[ERROR]: No se pudo calcular el tamaño del archivo.");
                 close(fd_media_compressed);
                 free(compressedFilePath);
                 return;
             }
-            lseek(fd_media_compressed, 0, SEEK_SET);
             close(fd_media_compressed);
 
             // Convertir tamaño del archivo a string
             char *fileSizeStrCompressed = NULL;
-            if (asprintf(&fileSizeStrCompressed, "%ld", fileSizeCompressed) == -1)
-            {
+            if (asprintf(&fileSizeStrCompressed, "%ld", fileSizeCompressed) == -1) {
                 logError("[ERROR]: No se pudo asignar memoria para el tamaño del archivo.");
                 free(compressedFilePath);
                 return;
@@ -373,24 +377,72 @@ void processReceivedFrameFromFleck(int clientSocket, const Frame *request)
             logInfo("\n[INFO]: Tamaño del archivo calculado:");
             logInfo(fileSizeStrCompressed);
 
+            // Enviar la trama del archivo distorsionado
+            enviaTramaArxiuDistorsionat(clientSocket, fileSizeStrCompressed, compressedMD5);
+
             // Liberar memoria dinámica asignada
             free(compressedFilePath);
             free(fileSizeStrCompressed);
-        }
-        else
-        {
+        } else {
             logError("[ERROR]: El MD5 no coincide. Archivo recibido está corrupto.");
+            sendMD5Response(clientSocket, "CHECK_KO");
             unlink(finalFilePath); // Eliminar el archivo en caso de error
-            send_frame_with_error(clientSocket, "CHECK_KO");
         }
+    }
+}
 
-        break;
+void sendMD5Response(int clientSocket, const char *status) {
+    Frame response = {0};
+    response.type = 0x06; // Tipo de trama para respuesta MD5
+    strncpy(response.data, status, sizeof(response.data) - 1);
+    response.data_length = strlen(response.data);
+    response.timestamp = (uint32_t)time(NULL);
+    response.checksum = calculate_checksum(response.data, response.data_length, 1);
+
+    logInfo("[INFO]: Enviando respuesta de MD5 al cliente.");
+    if (escribirTrama(clientSocket, &response) < 0) {
+        logError("[ERROR]: Error al enviar la respuesta MD5.");
+    }
+}
+
+// Función para enviar la trama del archivo distorsionado
+void enviaTramaArxiuDistorsionat(int clientSocket, const char *fileSizeCompressed, const char *compressedMD5) {
+    Frame frame = {0};
+    frame.type = 0x04;
+    snprintf(frame.data, sizeof(frame.data), "%s&%s", fileSizeCompressed, compressedMD5);
+    frame.data_length = strlen(frame.data);
+    frame.timestamp = (uint32_t)time(NULL);
+    frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
+
+    logInfo("[INFO]: Enviando trama del archivo distorsionado...");
+    if (escribirTrama(clientSocket, &frame) < 0) {
+        logError("[ERROR]: Fallo al enviar la trama del archivo distorsionado.");
+    }
+    
+    logInfo("[SUCCESS]: Trama del archivo distorsionado enviada correctamente.");
+
+    // Preparar para enviar el archivo comprimido en tramas binarias
+    SendCompressedFileArgs *args = malloc(sizeof(SendCompressedFileArgs));
+    if (!args) {
+        logError("[ERROR]: No se pudo asignar memoria para los argumentos del hilo de envío.");
+        return;
     }
 
-    default:
-        logWarning("[WARNING]: Frame desconocido recibido.");
-        break;
+    // Asignar los argumentos necesarios
+    args->clientSocket = clientSocket;
+    args->filePath = strdup(HARLEY_PATH_FILES); // Asegúrate de duplicar la ruta
+    args->fileSize = strtoull(fileSizeCompressed, NULL, 10);
+
+    // Crear un hilo para enviar el archivo comprimido
+    pthread_t sendThread;
+    if (pthread_create(&sendThread, NULL, sendCompressedFileToFleck, args) != 0) {
+        logError("[ERROR]: No se pudo crear el hilo para enviar el archivo comprimido.");
+        free(args->filePath);
+        free(args);
+        return;
     }
+
+    pthread_detach(sendThread); // Liberar el hilo automáticamente al finalizar
 }
 
 // Procesa un frame recibido de Gotham
@@ -413,7 +465,7 @@ void processReceivedFrame(int gothamSocket, const Frame *response)
         frame.data_length = strlen(frame.data);
         frame.checksum = calculate_checksum(frame.data, frame.data_length, 0);
 
-        send_frame(gothamSocket, &frame);
+        escribirTrama(gothamSocket, &frame);
         printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Respuesta DISTORT_OK enviada.");
         break;
 
@@ -424,7 +476,7 @@ void processReceivedFrame(int gothamSocket, const Frame *response)
         errorFrame.data_length = strlen(errorFrame.data);
         errorFrame.checksum = calculate_checksum(errorFrame.data, errorFrame.data_length, 0);
 
-        send_frame(gothamSocket, &errorFrame);
+        escribirTrama(gothamSocket, &errorFrame);
         break;
     }
 }
@@ -476,7 +528,7 @@ int main(int argc, char *argv[])
     frame.data_length = strlen(frame.data);
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
-    if (send_frame(gothamSocket, &frame) < 0)
+    if (escribirTrama(gothamSocket, &frame) < 0)
     {
         printColor(ANSI_COLOR_RED, "[ERROR]: Error enviando el registro a Gotham.");
         close(gothamSocket);
@@ -486,7 +538,7 @@ int main(int argc, char *argv[])
 
     // Esperar respuesta del registro
     Frame response;
-    if (receive_frame(gothamSocket, &response) != 0)
+    if (leerTrama(gothamSocket, &response) != 0)
     {
         printColor(ANSI_COLOR_RED, "[ERROR]: No se recibió respuesta de Gotham.");
         close(gothamSocket);

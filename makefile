@@ -12,10 +12,10 @@
 
 # Variables
 CC = gcc
-CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking -IFrameUtils -ILogging -IMD5SUM -IFrameUtilsBinary
+CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking -IFrameUtils -ILogging -IMD5SUM -IFrameUtilsBinary -IGestorTramas
 
 # Comunes
-COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c Networking/Networking.c FrameUtils/FrameUtils.c Logging/Logging.c MD5SUM/md5Sum.c FrameUtilsBinary/FrameUtilsBinary.c
+COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c GestorTramas/GestorTramas.c Networking/Networking.c FrameUtils/FrameUtils.c Logging/Logging.c MD5SUM/md5Sum.c FrameUtilsBinary/FrameUtilsBinary.c
 # Objectius per compilar cada executable
 all: Fleck_Montserrat.exe Fleck_Matagalls.exe Harley_Montserrat.exe Harley_Matagalls.exe \
      Harley_Puigpedros.exe Enigma_Puigpedros.exe Gotham_Montserrat.exe
