@@ -8,31 +8,33 @@ int process_compression(const char *filepath, int factor) {
         return -1;
     }
 
+    int result = 0;
+
     // Procesar según la extensión
     if (strcmp(extension, "png") == 0 || strcmp(extension, "jpg") == 0 || 
         strcmp(extension, "jpeg") == 0 || strcmp(extension, "bmp") == 0 || 
         strcmp(extension, "tga") == 0) {
         // Comprimir imagen
-        int result = SO_compressImage((char *)filepath, factor);
+        result = SO_compressImage((char *)filepath, factor);
         if (result != 0) {
             fprintf(stderr, "[ERROR]: Error al comprimir la imagen '%s'. Código de error: %d\n", filepath, result);
-            return result;
+        } else {
+            printf("[INFO]: Imagen comprimida correctamente: '%s'.\n", filepath);
         }
-        printf("[INFO]: Imagen comprimida correctamente: '%s'.\n", filepath);
     } else if (strcmp(extension, "wav") == 0) {
         // Comprimir audio
-        int result = SO_compressAudio((char *)filepath, factor);
+        result = SO_compressAudio((char *)filepath, factor);
         if (result != 0) {
             fprintf(stderr, "[ERROR]: Error al comprimir el audio '%s'. Código de error: %d\n", filepath, result);
-            return result;
+        } else {
+            printf("[INFO]: Audio comprimido correctamente: '%s'.\n", filepath);
         }
-        printf("[INFO]: Audio comprimido correctamente: '%s'.\n", filepath);
     } else {
         fprintf(stderr, "[ERROR]: Extensión no soportada para compresión: '%s'.\n", extension);
-        return -1;
+        result = -1;
     }
 
-    return 0;  // Éxito
+    return result;
 }
 
 int is_valid_extension(const char *filepath) {

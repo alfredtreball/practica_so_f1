@@ -25,12 +25,13 @@
 #include "HarleyCompression/compression_handler.h"
 
 #define HARLEY_PATH_FILES "harley_directory/"
+#define HARLEY_TYPE "MEDIA"
 
 void *handleFleckFrames(void *arg);
 void processReceivedFrameFromFleck(int clientSocket, const Frame *request);
 void processReceivedFrame(int gothamSocket, const Frame *response);
 void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSize, size_t *currentFileSize, int clientSocket);
-void enviaTramaArxiuDistorsionat(int clientSocket, const char *fileSizeCompressed, const char *compressedMD5);
+void enviaTramaArxiuDistorsionat(int clientSocket, const char *fileSizeCompressed, const char *compressedMD5, const char *compressedFilePath);
 void send_frame_with_error(int clientSocket, const char *errorMessage);
 void send_frame_with_ok(int clientSocket);
 void sendMD5Response(int clientSocket, const char *status);
@@ -40,12 +41,14 @@ HarleyConfig *globalharleyConfig = NULL;
 // Variable global para el socket
 int gothamSocket = -1;
 float resultStatus;
+volatile sig_atomic_t stop = 0;
 
 // Estructura para los argumentos del hilo
 typedef struct {
     int clientSocket;
     char *filePath;
     off_t fileSize;
+    char *compressedPath; // Ruta del archivo comprimido
 } SendCompressedFileArgs;
 
 char receivedFileName[256] = {0}; // Nombre del archivo recibido
@@ -67,16 +70,30 @@ void sendDisconnectFrameToGotham(const char *mediaType)
 }
 
 // Función para manejar señales como SIGINT
-void signalHandler(int sig)
-{
-    if (sig == SIGINT)
-    {
-        logInfo("[INFO]: Desconectando de Gotham...");
-        if (gothamSocket >= 0)
-        {
-            sendDisconnectFrameToGotham("MEDIA"); // Envía desconexión para tipo MEDIA
+void signalHandler(int sig) {
+    if (sig == SIGINT) {
+        logInfo("[INFO]: Señal SIGINT recibida. Cerrando conexiones...");
+        sendDisconnectFrameToGotham(HARLEY_TYPE);
+         stop = 1;
+
+        if (gothamSocket >= 0) {
             close(gothamSocket);
+            gothamSocket = -1;
         }
+
+        if (tempFileDescriptor >= 0) {
+            close(tempFileDescriptor);
+            tempFileDescriptor = -1;
+        }
+
+        if (globalharleyConfig) {
+            if (globalharleyConfig->workerType) free(globalharleyConfig->workerType);
+            if (globalharleyConfig->ipFleck) free(globalharleyConfig->ipFleck);
+            if (globalharleyConfig->ipGotham) free(globalharleyConfig->ipGotham);
+            free(globalharleyConfig);
+        }
+
+        pthread_exit(NULL); // Asegura que los hilos finalicen
         exit(0);
     }
 }
@@ -94,7 +111,7 @@ void *handleGothamFrames(void *arg)
     int gothamSocket = *(int *)arg;
 
     Frame frame;
-    while (leerTrama(gothamSocket, &frame) == 0)
+    while (!stop && leerTrama(gothamSocket, &frame) == 0)
     {
         processReceivedFrame(gothamSocket, &frame);
     }
@@ -104,19 +121,22 @@ void *handleGothamFrames(void *arg)
     pthread_exit(NULL);
 }
 
-int receive_frame_header(int clientSocket, Frame *header)
-{
-    ssize_t bytesRead = recv(clientSocket, header, sizeof(Frame), MSG_PEEK);
-    if (bytesRead != sizeof(Frame))
-    {
-        logError("[ERROR]: Error al leer la cabecera del frame.");
-        return -1;
+int receive_frame_header(int clientSocket, Frame *header) {
+    size_t totalBytesRead = 0; // Cambiado a size_t
+    while (totalBytesRead < sizeof(Frame)) {
+        ssize_t bytesRead = recv(clientSocket, ((char *)header) + totalBytesRead, sizeof(Frame) - totalBytesRead, MSG_PEEK);
+        if (bytesRead <= 0) {
+            logError("[ERROR]: Error al leer la cabecera del frame.");
+            return -1;
+        }
+        totalBytesRead += bytesRead;
     }
     return 0;
 }
 
 void *handleFleckFrames(void *arg) {
     int clientSocket = *(int *)arg;
+    free(arg);
 
     size_t expectedFileSize = 0;   // Tamaño esperado del archivo (de la trama 0x03)
     size_t currentFileSize = 0;    // Tamaño recibido hasta el momento
@@ -200,11 +220,32 @@ void *sendCompressedFileToFleck(void *args) {
     const char *filePath = sendArgs->filePath;
     free(sendArgs); // Liberar memoria de los argumentos
 
+    printf("[DEBUG]: Intentando abrir el archivo comprimido en la ruta: %s", filePath);
+
+    if (access(filePath, F_OK) != 0) {
+        logError("[ERROR]: El archivo comprimido no existe. Verifica el proceso de compresión.");
+        return NULL;
+    }
+
+    printf("[INFO]: El archivo comprimido se creó correctamente: %s", filePath);
+
     int fd = open(filePath, O_RDONLY, 0666);
     if (fd < 0) {
         logError("[ERROR]: No se pudo abrir el archivo comprimido.");
         return NULL;
     }
+
+    off_t fileSize = lseek(fd, 0, SEEK_END);
+    if (fileSize <= 0) {
+        logError("[ERROR]: El archivo comprimido está vacío o no se pudo calcular su tamaño.");
+        close(fd);
+        return NULL;
+    }
+    logInfo("[DEBUG]: Tamaño del archivo comprimido: ");
+    char sizeStr[32]; // Buffer para almacenar la cadena del tamaño
+    snprintf(sizeStr, sizeof(sizeStr), "%ld", fileSize); // Convertir off_t a cadena
+    logInfo(sizeStr); // Pasar la cadena a logInfo
+    lseek(fd, 0, SEEK_SET);
 
     BinaryFrame frame = {0};
     frame.type = 0x05; // Tipo de trama binaria
@@ -215,6 +256,7 @@ void *sendCompressedFileToFleck(void *args) {
     logInfo("[INFO]: Iniciando envío del archivo comprimido por tramas 0x05...");
 
     while ((bytesRead = read(fd, buffer, sizeof(buffer))) > 0) {
+        printf("[DEBUG]: Bytes leídos del archivo comprimido: %zd", bytesRead);
         frame.data_length = bytesRead;
         memcpy(frame.data, buffer, bytesRead);
         frame.timestamp = (uint32_t)time(NULL);
@@ -227,6 +269,7 @@ void *sendCompressedFileToFleck(void *args) {
         }
 
         usleep(1000); // Pausa para evitar congestión
+        
     }
 
     if (bytesRead < 0) {
@@ -325,10 +368,20 @@ void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSi
                 return;
             }
 
+            printf("[INFO]: Proceso de compresión completado exitosamente para el archivo: %s", finalFilePath);
+
             // Crear la ruta del archivo comprimido dinámicamente
             char *compressedFilePath = NULL;
             if (asprintf(&compressedFilePath, "%s", finalFilePath) == -1) {
                 logError("[ERROR]: No se pudo asignar memoria para la ruta del archivo comprimido.");
+                return;
+            }
+
+            // Validar que el archivo comprimido existe
+            if (access(compressedFilePath, F_OK) != 0) {
+                logError("[ERROR]: El archivo comprimido no se creó correctamente.");
+                unlink(finalFilePath);
+                free(compressedFilePath);
                 return;
             }
 
@@ -378,7 +431,7 @@ void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSi
             logInfo(fileSizeStrCompressed);
 
             // Enviar la trama del archivo distorsionado
-            enviaTramaArxiuDistorsionat(clientSocket, fileSizeStrCompressed, compressedMD5);
+            enviaTramaArxiuDistorsionat(clientSocket, fileSizeStrCompressed, compressedMD5, compressedFilePath);
 
             // Liberar memoria dinámica asignada
             free(compressedFilePath);
@@ -406,7 +459,7 @@ void sendMD5Response(int clientSocket, const char *status) {
 }
 
 // Función para enviar la trama del archivo distorsionado
-void enviaTramaArxiuDistorsionat(int clientSocket, const char *fileSizeCompressed, const char *compressedMD5) {
+void enviaTramaArxiuDistorsionat(int clientSocket, const char *fileSizeCompressed, const char *compressedMD5, const char *compressedFilePath) {
     Frame frame = {0};
     frame.type = 0x04;
     snprintf(frame.data, sizeof(frame.data), "%s&%s", fileSizeCompressed, compressedMD5);
@@ -430,7 +483,7 @@ void enviaTramaArxiuDistorsionat(int clientSocket, const char *fileSizeCompresse
 
     // Asignar los argumentos necesarios
     args->clientSocket = clientSocket;
-    args->filePath = strdup(HARLEY_PATH_FILES); // Asegúrate de duplicar la ruta
+    args->filePath = strdup(compressedFilePath  ); // Asegúrate de duplicar la ruta
     args->fileSize = strtoull(fileSizeCompressed, NULL, 10);
 
     // Crear un hilo para enviar el archivo comprimido
@@ -470,12 +523,13 @@ void processReceivedFrame(int gothamSocket, const Frame *response)
         break;
 
     default:
-        printColor(ANSI_COLOR_RED, "[ERROR]: Comando desconocido recibido.");
-        Frame errorFrame = {.type = 0xFF, .timestamp = time(NULL)};
-        strncpy(errorFrame.data, "CMD_KO", sizeof(errorFrame.data) - 1);
-        errorFrame.data_length = strlen(errorFrame.data);
-        errorFrame.checksum = calculate_checksum(errorFrame.data, errorFrame.data_length, 0);
+        Frame errorFrame = {0};
+        errorFrame.type = 0x09; // Tipo de trama de error
+        errorFrame.data_length = 0; // Sin datos adicionales
+        errorFrame.timestamp = (uint32_t)time(NULL);
+        errorFrame.checksum = calculate_checksum(errorFrame.data, errorFrame.data_length, 1);
 
+        // Enviar la trama de error
         escribirTrama(gothamSocket, &errorFrame);
         break;
     }
@@ -587,20 +641,59 @@ int main(int argc, char *argv[])
     printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Servidor local de Harley iniciado correctamente.");
 
     // Bucle para manejar conexiones de Fleck
-    while (1)
-    {
+    while (1) {
+        while (!stop) {
+            // Continuar aceptando conexiones de Fleck
+            int clientSocket = accept_connection(fleckSocket);
+
+            if (clientSocket < 0) {
+                logError("[ERROR]: No se pudo aceptar la conexión del cliente.");
+                continue;
+            }
+
+            pthread_t clientThread;
+            int *socketArg = malloc(sizeof(int));
+            if (!socketArg) {
+                logError("[ERROR]: No se pudo asignar memoria para el socket del cliente.");
+                close(clientSocket);
+                continue;
+            }
+            *socketArg = clientSocket;
+
+            if (pthread_create(&clientThread, NULL, handleFleckFrames, socketArg) != 0) {
+                logError("[ERROR]: No se pudo crear el hilo para manejar al cliente.");
+                close(clientSocket);
+                free(socketArg);
+                continue;
+            }
+
+            pthread_detach(clientThread);
+        }
+
         int clientSocket = accept_connection(fleckSocket);
 
-        if (clientSocket < 0)
-        {
+        if (clientSocket < 0) {
             logError("[ERROR]: No se pudo aceptar la conexión del Fleck.");
             continue;
         }
 
-        if (clientSocket >= 0)
-        {
+        if (clientSocket >= 0) {
             pthread_t fleckThread;
-            pthread_create(&fleckThread, NULL, (void *(*)(void *))handleFleckFrames, &clientSocket);
+            int *socketArg = malloc(sizeof(int));
+            if (!socketArg) {
+                logError("[ERROR]: No se pudo asignar memoria para el socket del cliente.");
+                close(clientSocket); // Cierra el socket si hay un error
+                continue;
+            }
+            *socketArg = clientSocket;
+
+            if (pthread_create(&fleckThread, NULL, handleFleckFrames, socketArg) != 0) {
+                logError("[ERROR]: No se pudo crear el hilo para manejar el cliente.");
+                close(clientSocket); // Cierra el socket si hay un error
+                free(socketArg);
+                continue;
+            }
+
             pthread_detach(fleckThread);
         }
     }

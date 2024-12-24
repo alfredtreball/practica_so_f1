@@ -15,6 +15,7 @@
 #include "Networking/Networking.h"
 #include "FrameUtils/FrameUtils.h"
 #include "Logging/Logging.h"
+#include "Heartbeat/heartbeat.h"
 
 // Funciones principales
 void *handleFleckFrames(void *arg);

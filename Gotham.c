@@ -23,6 +23,7 @@
 #include <pthread.h>
 #include <ctype.h>
 #include <signal.h>
+#include <time.h> // Para time()
 
 #include "GestorTramas/GestorTramas.h"
 #include "FileReader/FileReader.h"
@@ -98,6 +99,46 @@ void listClients(ClientManager *manager);
 void handleSigint(int sig);
 void alliberarMemoria(GothamConfig *gothamConfig);
 
+void *enviarHeartbeat(void *arg) {
+    WorkerManager *workerManager = (WorkerManager *)arg;
+
+    while (!stop_server) {
+        Frame heartbeat = {0};
+        heartbeat.type = 0x12; // Tipo HEARTBEAT
+        heartbeat.data_length = 0; // Sin datos adicionales
+        heartbeat.timestamp = (uint32_t)time(NULL); // Marca de tiempo actual
+
+        // Enviar a todos los clientes conectados (Fleck)
+        pthread_mutex_lock(&clientManager->mutex);
+        for (int i = 0; i < clientManager->clientCount; i++) {
+            int clientSocket = clientManager->clients[i].socket_fd;
+            if (escribirTrama(clientSocket, &heartbeat) < 0) {
+                logError("[ERROR]: Error enviando HEARTBEAT a cliente.");
+            } else {
+                logInfo("[INFO]: HEARTBEAT enviado a cliente.");
+            }
+        }
+        pthread_mutex_unlock(&clientManager->mutex);
+
+        // Enviar a todos los workers conectados (Harley y Enigma)
+        pthread_mutex_lock(&workerManager->mutex);
+        for (int i = 0; i < workerManager->workerCount; i++) {
+            WorkerInfo *worker = &workerManager->workers[i];
+            if (escribirTrama(worker->socket_fd, &heartbeat) < 0) {
+                logError("[ERROR]: Error enviando HEARTBEAT a worker.");
+            } else {
+                logInfo("[INFO]: HEARTBEAT enviado a worker.");
+            }
+        }
+        pthread_mutex_unlock(&workerManager->mutex);
+
+        sleep(1); // Esperar 1 segundo antes del siguiente HEARTBEAT
+    }
+
+    logInfo("[INFO]: Hilo de HEARTBEAT finalizado.");
+    return NULL;
+}
+
 // Crea un nou gestor de clients
 ClientManager *createClientManager() {
     ClientManager *manager = malloc(sizeof(ClientManager));
@@ -122,7 +163,6 @@ ClientManager *createClientManager() {
         exit(EXIT_FAILURE);
     }
 
-    logInfo("[DEBUG]: ClientManager creado con éxito.");
     return manager;
 }
 
@@ -240,7 +280,6 @@ WorkerManager *createWorkerManager() {
     manager->mainTextWorker = NULL;
     manager->mainMediaWorker = NULL;
 
-    logInfo("[DEBUG]: WorkerManager creado con éxito.");
     return manager;
 }
 
@@ -568,12 +607,10 @@ void *gestionarConexion(void *arg) {
         logInfo("[INFO]: Finalizando conexión por cierre del servidor.");
         removeClientBySocket(clientManager, client_fd);
     } else if (!disconnectHandled) {
-        logInfo("[INFO]: El cliente cerró la conexión sin trama de desconexión.");
         removeClientBySocket(clientManager, client_fd);
     }
 
     close(client_fd);
-    logInfo("[INFO]: Conexión cerrada y recursos liberados.");
     return NULL;
 }
 
@@ -855,7 +892,7 @@ void alliberarMemoria(GothamConfig *gothamConfig) {
 }
 
 void handleSigint(int sig) {
-    (void)sig;
+    (void)sig; // Ignorar el valor de la señal
     logInfo("S'ha rebut SIGINT. Tancant el sistema...\n");
     stop_server = 1;
 
@@ -864,10 +901,7 @@ void handleSigint(int sig) {
         pthread_mutex_lock(&workerManager->mutex);
         for (int i = 0; i < workerManager->workerCount; i++) {
             WorkerInfo *worker = &workerManager->workers[i];
-            Frame closeFrame = {.type = 0xFF, .timestamp = (uint32_t)time(NULL)};
-            closeFrame.checksum = calculate_checksum(closeFrame.data, closeFrame.data_length, 1);
-            send_frame(worker->socket_fd, &closeFrame); // Informar al worker
-            close(worker->socket_fd); // Cerrar el socket
+            close(worker->socket_fd); // Cerrar el socket del worker
         }
         pthread_mutex_unlock(&workerManager->mutex);
         freeWorkerManager(workerManager); // Liberar el WorkerManager
@@ -887,12 +921,22 @@ void handleSigint(int sig) {
 
     // Cerrar los descriptores de archivo globales
     if (global_server_fds) {
-        close(global_server_fds->server_fd_fleck);
-        close(global_server_fds->server_fd_enigma);
+        if (global_server_fds->server_fd_fleck >= 0) {
+            close(global_server_fds->server_fd_fleck);
+        }
+        if (global_server_fds->server_fd_enigma >= 0) {
+            close(global_server_fds->server_fd_enigma);
+        }
     }
 
     // Liberar la configuración global
     if (global_config) {
+        if (global_config->ipFleck) {
+            free(global_config->ipFleck);
+        }
+        if (global_config->ipHarEni) {
+            free(global_config->ipHarEni);
+        }
         free(global_config);
         global_config = NULL;
     }
@@ -1043,6 +1087,14 @@ int main(int argc, char *argv[]) {
             }
         }
     }
+
+    pthread_t heartbeatThread;
+    if (pthread_create(&heartbeatThread, NULL, enviarHeartbeat, manager) != 0) {
+        logError("[ERROR]: No se pudo crear el hilo de HEARTBEAT.");
+        exit(EXIT_FAILURE);
+    }
+    pthread_detach(heartbeatThread); // Liberar automáticamente el recurso del hilo
+    logInfo("[INFO]: Hilo de HEARTBEAT iniciado.");
 
     // Antes de salir, libera todo explícitamente
     if (manager) {

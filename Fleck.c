@@ -11,6 +11,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <pthread.h>
+#include <errno.h>
 
 #include "GestorTramas/GestorTramas.h"
 #include "FileReader/FileReader.h"
@@ -37,6 +38,7 @@ typedef struct {
 int gothamSocket = -1; // Variable global para manejar el socket
 int workerSocket = -1;
 float statusResult;
+char distortedFileName[256] = {0}; // Variable global para almacenar el nombre del archivo
 
 void signalHandler(int sig);
 void processCommandWithGotham(const char *command);
@@ -50,9 +52,14 @@ void *sendFileChunks(void *args);
 void sendDistortFileRequest(int workerSocket, const char *fileName, off_t fileSize, const char *md5Sum, const char *factor);
 void sendDisconnectFrameToGotham(const char *userName);
 void sendDisconnectFrameToWorker(int workerSocket, const char *userName);
-void processCommand(char *command, int gothamSocket, int workerSocket);
+void processCommand(char *command, int gothamSocket);
+void releaseResources();
 
 FleckConfig *globalFleckConfig = NULL;
+
+volatile sig_atomic_t stop = 0; // Controla si el programa debe detenerse
+time_t last_heartbeat = 0;     // Tiempo del último HEARTBEAT recibido
+
 
 void printColor(const char *color, const char *message) {
     write(1, color, strlen(color));
@@ -91,7 +98,7 @@ void listText(const char *directory) {
         char *line;
         while ((line = readUntil(tempFd, '\n')) != NULL) {
             count++;
-            free(line);
+            free(line); 
         }
 
         char *countStr = intToStr(count); 
@@ -99,6 +106,7 @@ void listText(const char *directory) {
         printF(countStr);
         printF(" text files available:\n");
         free(countStr);
+        free(line);
 
         lseek(tempFd, 0, SEEK_SET);
 
@@ -113,6 +121,7 @@ void listText(const char *directory) {
             free(line);
         }
 
+        free(line);
         close(tempFd);
     } else {
         printF("Error en fork\n");
@@ -162,6 +171,7 @@ void listMedia(const char *directory) {
         printF(countStr);
         printF(" media files available:\n");
         free(countStr);
+        free(line);
 
         lseek(tempFd, 0, SEEK_SET);
 
@@ -176,6 +186,7 @@ void listMedia(const char *directory) {
             free(line);
         }
 
+        free(line);
         close(tempFd);
     } else {
         printF("Error en fork\n");
@@ -184,7 +195,6 @@ void listMedia(const char *directory) {
 
 void processCommandWithGotham(const char *command) {
     Frame frame = {0};
-
     if (strcasecmp(command, "CONNECT") == 0) {
         if (gothamSocket != -1) {
             printColor(ANSI_COLOR_YELLOW, "[INFO]: Ya estás conectado a Gotham.\n");
@@ -209,62 +219,45 @@ void processCommandWithGotham(const char *command) {
         snprintf(frame.data, sizeof(frame.data), "%s&%s&%d",
                  globalFleckConfig->user, globalFleckConfig->ipGotham, globalFleckConfig->portGotham);
         frame.data_length = strlen(frame.data);
-        frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
+        frame.checksum = calculate_checksum(frame.data, frame.data_length, 0);
 
-        char buffer[FRAME_SIZE];
-        serialize_frame(&frame, buffer);
-
-        if (write(gothamSocket, buffer, FRAME_SIZE) < 0) {
-            printColor(ANSI_COLOR_RED, "[ERROR]: Error al enviar la solicitud de conexión a Gotham.\n");
+        // Enviar trama de conexión
+        if (escribirTrama(gothamSocket, &frame) < 0) {
+            logError("[GestorTramas] Error al enviar la solicitud de conexión a Gotham.");
             close(gothamSocket);
             gothamSocket = -1;
             return;
         }
 
-        if (read(gothamSocket, buffer, FRAME_SIZE) <= 0) {
-            printColor(ANSI_COLOR_RED, "[ERROR]: No se recibió respuesta de Gotham.\n");
+        // Leer respuesta de conexión
+        Frame response = {0};
+        if (leerTrama(gothamSocket, &response) != 0) {
+            logError("[GestorTramas] Error al leer la respuesta de conexión.");
             close(gothamSocket);
             gothamSocket = -1;
             return;
         }
 
-        Frame response;
-        if (deserialize_frame(buffer, &response) != 0) {
-            printColor(ANSI_COLOR_RED, "[ERROR]: Error al procesar la respuesta de Gotham.\n");
-            close(gothamSocket);
-            gothamSocket = -1;
-            return;
-        }
-
-        // Validar checksum de la respuesta
-        uint16_t resp_checksum = calculate_checksum(response.data, response.data_length, 1);
-        if (resp_checksum != response.checksum) {
-            printColor(ANSI_COLOR_RED, "[ERROR]: Respuesta de Gotham con checksum inválido\n");
-            close(gothamSocket);
-            gothamSocket = -1;
-            return;
-        }
-
+        // Validar respuesta
         if (response.type == 0x01) {
             if (response.data_length == 0) { // DATA vacío, longitud 0
                 printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Conexión establecida con Gotham.\n");
+            } else {
+                printColor(ANSI_COLOR_RED, "[ERROR]: Respuesta inesperada de Gotham.\n");
+                close(gothamSocket);
+                gothamSocket = -1;
+                return;
             }
-        } else if (response.type == 0x01 && strcmp(response.data, "CON_KO") == 0) {
-            printColor(ANSI_COLOR_RED, "[ERROR]: Gotham rechazó la conexión.\n");
-            close(gothamSocket);
-            gothamSocket = -1;
         } else {
             printColor(ANSI_COLOR_RED, "[ERROR]: Respuesta inesperada de Gotham.\n");
             close(gothamSocket);
             gothamSocket = -1;
+            return;
         }
-        return;
     }
-
-    printColor(ANSI_COLOR_RED, "[ERROR]: Comando CONNECT no válido en este contexto.\n");
 }
 
-void processCommand(char *command, int gothamSocket, int workerSocket) {
+void processCommand(char *command, int gothamSocket) {
     if (command == NULL || strlen(command) == 0 || strcmp(command, "\n") == 0) {
         printColor(ANSI_COLOR_RED, "[ERROR]: Empty command.\n");
         return;
@@ -297,24 +290,17 @@ void processCommand(char *command, int gothamSocket, int workerSocket) {
         printColor(ANSI_COLOR_GREEN, "[SUCCESS]: All local data has been cleared in Fleck.\n");
     } else if (strcasecmp(cmd, "LOGOUT") == 0 && subCmd == NULL) { //ANAR-SE CAP A FORA //TODO ENCARA I NO ESTAR CONNECTAT CAP A FORA
         logInfo("[INFO]: Procesando comando LOGOUT...");
-
+        // Enviar trama de desconexión a Gotham
         if (gothamSocket >= 0) {
             sendDisconnectFrameToGotham(globalFleckConfig->user);
-            close(gothamSocket);
-            gothamSocket = -1;
             logInfo("[INFO]: Desconexión de Gotham completada.");
-        } else {
-            logWarning("[WARNING]: No estás conectado a Gotham.");
         }
+        // Liberar todos los recursos
+        releaseResources();
 
-        if (workerSocket >= 0) {
-            sendDisconnectFrameToWorker(workerSocket, globalFleckConfig->user);
-            close(workerSocket);
-            workerSocket = -1;
-            logInfo("[INFO]: Desconexión del Worker completada.");
-        } else {
-            logWarning("[WARNING]: No estás conectado a un Worker.");
-        }
+        // Finalizar el programa
+        logInfo("[INFO]: Saliendo del programa Fleck.");
+        exit(0);
     } else if (strcasecmp(cmd, "DISTORT") == 0) {
         if (gothamSocket == -1) {
             printColor(ANSI_COLOR_RED, "[ERROR]: Debes conectarte a Gotham antes de ejecutar DISTORT.\n");
@@ -329,18 +315,36 @@ void processCommand(char *command, int gothamSocket, int workerSocket) {
     }
 }
 
-//FLECK  ENVIA 0X05 AMB LES DADES Y WORKER RESPON 0X04 AMB FILESIZE Y MD5SUM QUAN ACABI D'ENVIAR TOT L'ARXIU DISTORSIONAT
-//PERCENTATGE PER CHECK STATUS, ÉS DOBLE OSEA QUE AL ENVIAR Y RECIBIR VA POR LADO
-//TODO QUAN PASSEM FITXERS BINARIS, FER UNA FUNCIÓ AMB LA TRAMA SHIFTEJANT, SINÓ DONARÀ PROBLEMES AL REBRE I PROBAR AL ENVIAR
-//ESCOLTEM TRAMES UN COP ENVIEM L'ARXIU A HARLEY
+int receive_frame_header(int clientSocket, Frame *header) {
+    size_t totalBytesRead = 0; // Cambiado a size_t
+    while (totalBytesRead < sizeof(Frame)) {
+        ssize_t bytesRead = recv(clientSocket, ((char *)header) + totalBytesRead, sizeof(Frame) - totalBytesRead, MSG_PEEK);
+        if (bytesRead <= 0) {
+            logError("[ERROR]: Error al leer la cabecera del frame.");
+            return -1;
+        }
+        totalBytesRead += bytesRead;
+    }
+    return 0;
+}
+
 void *listenToHarley(void *arg) {
     int workerSocket = *(int *)arg;
+    free(arg);
 
     Frame response;
+    BinaryFrame binaryResponse; // Para las tramas binarias
+    static int fileDescriptor = -1;
+    static char filePath[512] = {0}; // Ruta completa al archivo en `fitxers_prova`
+
     while (1) {
-        // Leer las tramas que envía Harley
-        if (leerTrama(workerSocket, &response) != 0) {
-            logWarning("[WARNING]: Error al leer trama de Harley o conexión cerrada.");
+        // Leer el encabezado de la trama
+        if (receive_frame_header(workerSocket, &response) != 0) {
+            logWarning("[WARNING]: Error al leer la cabecera de Harley o conexión cerrada.");
+            if (fileDescriptor != -1) {
+                close(fileDescriptor);
+                fileDescriptor = -1;
+            }
             break;
         }
 
@@ -354,11 +358,57 @@ void *listenToHarley(void *arg) {
                     break;
                 }
 
-                logInfo("[INFO]: Archivo distorsionado recibido:");
+                logInfo("[INFO]: Información del archivo distorsionado recibida.");
                 logInfo("[INFO]: Tamaño del archivo distorsionado:");
                 logInfo(fileSizeStr);
                 logInfo("[INFO]: MD5 del archivo distorsionado:");
                 logInfo(md5Sum);
+
+                // Construir la ruta completa del archivo original en `fitxers_prova`
+                snprintf(filePath, sizeof(filePath), "%s%s", FILE_PATH, distortedFileName);
+                logInfo("[INFO]: Reemplazando archivo en:");
+                logInfo(filePath);
+                break;
+            }
+
+            case 0x05: { // Trama binaria de datos
+                logInfo("[INFO]: Trama 0x05 recibida de Harley.");
+
+                if (leerTramaBinaria(workerSocket, &binaryResponse) != 0) {
+                    logError("[ERROR]: Fallo al leer la trama binaria de Harley.");
+                    break;
+                }
+
+                if (binaryResponse.data_length > DATA_SIZE) {
+                    logError("[ERROR]: Longitud de datos inválida en trama 0x05.");
+                    break;
+                }
+
+                // Abrir el archivo en la carpeta `fitxers_prova` si no está abierto
+                if (fileDescriptor == -1) {
+                    fileDescriptor = open(filePath, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+                    if (fileDescriptor < 0) {
+                        logError("[ERROR]: No se pudo abrir el archivo para escribir los datos.");
+                        break;
+                    }
+                }
+
+                // Escribir los datos de la trama en el archivo
+                if (write(fileDescriptor, binaryResponse.data, binaryResponse.data_length) != binaryResponse.data_length) {
+                    logError("[ERROR]: Fallo al escribir datos en el archivo.");
+                    close(fileDescriptor);
+                    fileDescriptor = -1;
+                    break;
+                }
+
+                logInfo("[INFO]: Datos de trama 0x05 escritos en el archivo.");
+
+                // Si esta es la última trama, cerrar el archivo
+                if (binaryResponse.data_length < DATA_SIZE) { // Última trama
+                    close(fileDescriptor);
+                    fileDescriptor = -1;
+                    logInfo("[SUCCESS]: Archivo distorsionado recibido y reemplazado completamente.");
+                }
                 break;
             }
 
@@ -398,8 +448,6 @@ void *sendFileChunks(void *args) {
     char buffer[247]; // Máxima longitud permitida para DATA
     ssize_t bytesRead;
     int status = 1;
-
-    logInfo("[INFO]: Iniciando envío del archivo por tramas 0x05...");
 
     while ((bytesRead = read(fd, buffer, sizeof(buffer))) > 0) {
         frame.data_length = bytesRead;
@@ -466,6 +514,9 @@ void sendDistortFileRequest(int workerSocket, const char *fileName, off_t fileSi
         return;
     }
 
+    // Guardar el nombre del archivo en la variable global
+    strncpy(distortedFileName, fileName, sizeof(distortedFileName) - 1);
+
     // Enviar trama inicial de DISTORT FILE (0x03)
     Frame frame = {0};
     snprintf(frame.data, sizeof(frame.data), "%s&%s&%ld&%s&%s", 
@@ -475,7 +526,6 @@ void sendDistortFileRequest(int workerSocket, const char *fileName, off_t fileSi
     frame.timestamp = (uint32_t)time(NULL);
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
-    logInfo("[INFO]: Enviando solicitud DISTORT FILE (0x03) a Worker.");
     if (escribirTrama(workerSocket, &frame) < 0) {
         logError("[ERROR]: Error al enviar solicitud DISTORT FILE.");
         free(filePath);
@@ -490,9 +540,7 @@ void sendDistortFileRequest(int workerSocket, const char *fileName, off_t fileSi
         return;
     }
 
-    if (response.data_length == 0) {
-        logInfo("[INFO]: Worker listo para recibir el archivo. Iniciando envío...");
-    } else if (strcmp(response.data, "CON_KO") == 0) {
+    if (strcmp(response.data, "CON_KO") == 0) {
         logError("[ERROR]: Worker rechazó la conexión.");
         free(filePath);
         return;
@@ -523,7 +571,6 @@ void sendDistortFileRequest(int workerSocket, const char *fileName, off_t fileSi
     }
 
     pthread_detach(thread); // Liberar el hilo automáticamente
-    logInfo("[INFO]: Thread iniciado para enviar el archivo.");
 }
 
 
@@ -686,7 +733,41 @@ void processDistortFileCommand(const char *fileName, const char *factor, int got
     free(filePath);
 }
 
+// Nueva función para liberar recursos asignados por Fleck
+void releaseResources() {
+    // Liberar campos de configuración asignados dinámicamente
+    if (globalFleckConfig) {
+        if (globalFleckConfig->user) {
+            free(globalFleckConfig->user);
+        }
+        if (globalFleckConfig->directory) {
+            free(globalFleckConfig->directory);
+        }
+        if (globalFleckConfig->ipGotham) {
+            free(globalFleckConfig->ipGotham);
+        }
+        free(globalFleckConfig);
+        globalFleckConfig = NULL;
+    }
+
+    // Cerrar conexiones de socket si están abiertas
+    if (gothamSocket >= 0) {
+        close(gothamSocket);
+        gothamSocket = -1;
+    }
+
+    if (workerSocket >= 0) {
+        close(workerSocket);
+        workerSocket = -1;
+    }
+}
+
 void sendDisconnectFrameToGotham(const char *userName) {
+    if (gothamSocket < 0) {
+        logWarning("[INFO]: No se pudo enviar la trama de desconexión porque Gotham no está conectado.");
+        return;
+    }
+
     Frame frame = {0};
     frame.type = 0x07; // Tipo de desconexión
     frame.timestamp = (uint32_t)time(NULL);
@@ -698,17 +779,19 @@ void sendDisconnectFrameToGotham(const char *userName) {
     } else {
         frame.data_length = 0; // Sin datos adicionales
     }
-    
-    frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
+    logInfo("[INFO]: Enviando trama de desconexión a Gotham...");
     if (escribirTrama(gothamSocket, &frame) < 0) {
         logError("[ERROR]: Fallo al enviar trama de desconexión a Gotham.");
-    } else {
-        logInfo("[INFO]: Trama de desconexión enviada correctamente a Gotham.");
     }
 }
 
 void sendDisconnectFrameToWorker(int workerSocket, const char *userName) {
+    if (workerSocket < 0) {
+        logWarning("[INFO]: No se pudo enviar la trama de desconexión porque el socket del Worker no está conectado.");
+        return;
+    }
+
     Frame frame = {0};
     frame.type = 0x07; // Tipo de desconexión
     frame.timestamp = (uint32_t)time(NULL);
@@ -720,8 +803,6 @@ void sendDisconnectFrameToWorker(int workerSocket, const char *userName) {
     } else {
         frame.data_length = 0; // Sin datos adicionales
     }
-
-    frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
     logInfo("[INFO]: Enviando trama de desconexión al Worker...");
     if (escribirTrama(workerSocket, &frame) < 0) {
@@ -735,23 +816,28 @@ void sendDisconnectFrameToWorker(int workerSocket, const char *userName) {
 void signalHandler(int sig) {
     if (sig == SIGINT) {
         logInfo("[INFO]: Señal SIGINT recibida. Desconectando...");
+        stop = 1;
 
         // Desconexión de Gotham
         if (gothamSocket >= 0) {
             sendDisconnectFrameToGotham(globalFleckConfig->user);
             close(gothamSocket);
+            gothamSocket = -1;
         }
 
         // Desconexión de Worker
         if (workerSocket >= 0) {
             sendDisconnectFrameToWorker(workerSocket, globalFleckConfig->user);
             close(workerSocket);
+            workerSocket = -1;
         }
 
         free(globalFleckConfig);
+        logInfo("[INFO]: Fleck desconectado y cerrado correctamente.");
         exit(0);
     }
 }
+
 
 int main(int argc, char *argv[]) {
     printF("\033[1;34m\n###################################\n");
@@ -789,7 +875,7 @@ int main(int argc, char *argv[]) {
         }
 
         printF("\033[1;36m[INFO]: Processant la comanda...\n\033[0m");
-        processCommand(command, gothamSocket, workerSocket);
+        processCommand(command, gothamSocket);
         free(command);
     }
 

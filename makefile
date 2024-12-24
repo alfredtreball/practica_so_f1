@@ -12,10 +12,13 @@
 
 # Variables
 CC = gcc
-CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking -IFrameUtils -ILogging -IMD5SUM -IFrameUtilsBinary -IGestorTramas
+CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking -IFrameUtils -ILogging -IMD5SUM -IFrameUtilsBinary -IGestorTramas -IMessageQueue
 
 # Comunes
-COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c GestorTramas/GestorTramas.c Networking/Networking.c FrameUtils/FrameUtils.c Logging/Logging.c MD5SUM/md5Sum.c FrameUtilsBinary/FrameUtilsBinary.c
+COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c \
+         GestorTramas/GestorTramas.c Networking/Networking.c FrameUtils/FrameUtils.c \
+         Logging/Logging.c MD5SUM/md5Sum.c FrameUtilsBinary/FrameUtilsBinary.c MessageQueue/MessageQueue.c\
+
 # Objectius per compilar cada executable
 all: Fleck_Montserrat.exe Fleck_Matagalls.exe Harley_Montserrat.exe Harley_Matagalls.exe \
      Harley_Puigpedros.exe Enigma_Puigpedros.exe Gotham_Montserrat.exe
@@ -31,10 +34,6 @@ Fleck_Montserrat.exe: Fleck.c $(COMMON)
 # Compilació de Fleck a Matagalls
 Fleck_Matagalls.exe: Fleck.c $(COMMON)
 	$(CC) $(CFLAGS) Fleck.c $(COMMON) -o Fleck_Matagalls.exe
-
-# Compilació de Harley a Montserrat
-Harley_Montserrat.exe: Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c
-	$(CC) $(CFLAGS) Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c -o Harley_Montserrat.exe -lm
 
 # Compilació de Harley a Matagalls
 Harley_Matagalls.exe: Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c
@@ -58,14 +57,17 @@ vgm: Gotham_Montserrat.exe
 fm: Fleck_Montserrat.exe
 	./Fleck_Montserrat.exe fitxers_configuració/config_fleck.dat
 
+vfm: Fleck_Montserrat.exe
+	valgrind --dsymutil=yes --track-origins=yes --leak-check=full --track-fds=yes --show-reachable=yes -s ./Fleck_Montserrat.exe fitxers_configuració/config_fleck.dat
+
 fma: Fleck_Matagalls.exe
 	./Fleck_Matagalls.exe fitxers_configuració/config_fleck1.dat
 
-hm: Harley_Montserrat.exe
-	./Harley_Montserrat.exe fitxers_configuració/config_harley.dat
-
 hma: Harley_Matagalls.exe
 	./Harley_Matagalls.exe fitxers_configuració/config_harley1.dat
+
+vhma: Harley_Matagalls.exe
+	valgrind --dsymutil=yes --track-origins=yes --leak-check=full --track-fds=yes --show-reachable=yes -s ./Harley_Matagalls.exe fitxers_configuració/config_harley1.dat
 
 hpp: Harley_Puigpedros.exe
 	./Harley_Puigpedros.exe fitxers_configuració/config_harley_pp.dat

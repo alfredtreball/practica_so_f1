@@ -6,7 +6,6 @@
 
 int leerTrama(int socket_fd, Frame *frame) {
     if (receive_frame(socket_fd, frame) != 0) {
-        logError("[GestorTramas] Error al leer la trama normal.");
         enviarTramaError(socket_fd);
         return -1;
     }
