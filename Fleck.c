@@ -332,14 +332,13 @@ void *listenToHarley(void *arg) {
     int workerSocket = *(int *)arg;
     free(arg);
 
-    Frame response;
-    BinaryFrame binaryResponse; // Para las tramas binarias
     static int fileDescriptor = -1;
     static char filePath[512] = {0}; // Ruta completa al archivo en `fitxers_prova`
 
     while (1) {
-        // Leer el encabezado de la trama
-        if (receive_frame_header(workerSocket, &response) != 0) {
+        Frame header = {0};
+        // Leer la cabecera de la trama para tramas no binarias
+        if (receive_frame_header(workerSocket, &header) != 0) {
             logWarning("[WARNING]: Error al leer la cabecera de Harley o conexión cerrada.");
             if (fileDescriptor != -1) {
                 close(fileDescriptor);
@@ -348,85 +347,83 @@ void *listenToHarley(void *arg) {
             break;
         }
 
-        switch (response.type) {
-            case 0x04: { // Trama con información del archivo distorsionado
-                char fileSizeStr[20];
-                char md5Sum[33];
-
-                if (sscanf(response.data, "%19[^&]&%32s", fileSizeStr, md5Sum) != 2) {
-                    logError("[ERROR]: Trama 0x04 de Harley con formato inválido.");
-                    break;
-                }
-
-                logInfo("[INFO]: Información del archivo distorsionado recibida.");
-                logInfo("[INFO]: Tamaño del archivo distorsionado:");
-                logInfo(fileSizeStr);
-                logInfo("[INFO]: MD5 del archivo distorsionado:");
-                logInfo(md5Sum);
-
-                // Construir la ruta completa del archivo original en `fitxers_prova`
-                snprintf(filePath, sizeof(filePath), "%s%s", FILE_PATH, distortedFileName);
-                logInfo("[INFO]: Reemplazando archivo en:");
-                logInfo(filePath);
-                break;
-            }
-
-            case 0x05: { // Trama binaria de datos
+        // Verificar el tipo de trama
+        if (header.type == 0x05) {
+            BinaryFrame binaryResponse;
+            if (leerTramaBinaria(workerSocket, &binaryResponse) == 0) {
                 logInfo("[INFO]: Trama 0x05 recibida de Harley.");
-
-                if (leerTramaBinaria(workerSocket, &binaryResponse) != 0) {
-                    logError("[ERROR]: Fallo al leer la trama binaria de Harley.");
-                    break;
-                }
 
                 if (binaryResponse.data_length > DATA_SIZE) {
                     logError("[ERROR]: Longitud de datos inválida en trama 0x05.");
-                    break;
+                    continue;
                 }
 
-                // Abrir el archivo en la carpeta `fitxers_prova` si no está abierto
+                // Abrir el archivo si no está abierto
                 if (fileDescriptor == -1) {
                     fileDescriptor = open(filePath, O_WRONLY | O_CREAT | O_TRUNC, 0666);
                     if (fileDescriptor < 0) {
                         logError("[ERROR]: No se pudo abrir el archivo para escribir los datos.");
-                        break;
+                        continue;
                     }
                 }
 
-                // Escribir los datos de la trama en el archivo
+                // Escribir los datos en el archivo
                 if (write(fileDescriptor, binaryResponse.data, binaryResponse.data_length) != binaryResponse.data_length) {
                     logError("[ERROR]: Fallo al escribir datos en el archivo.");
                     close(fileDescriptor);
                     fileDescriptor = -1;
-                    break;
+                    continue;
                 }
 
                 logInfo("[INFO]: Datos de trama 0x05 escritos en el archivo.");
 
-                // Si esta es la última trama, cerrar el archivo
+                // Cerrar el archivo si es la última trama
                 if (binaryResponse.data_length < DATA_SIZE) { // Última trama
                     close(fileDescriptor);
                     fileDescriptor = -1;
                     logInfo("[SUCCESS]: Archivo distorsionado recibido y reemplazado completamente.");
                 }
+
+            } else {
+                logError("[ERROR]: Error al recibir trama binaria.");
                 break;
             }
+        } else { //Trames no binàries
+            Frame request;
+            if (leerTrama(workerSocket, &request) == 0) {
+                if(request.type == 0x04){
+                    char fileSizeStr[20];
+                    char md5Sum[33];
 
-            case 0x06: { // Respuesta de verificación MD5 o cualquier otra confirmación
-                logInfo("[INFO]: Respuesta 0x06 recibida de Harley:");
-                logInfo(response.data);
-                break;
+                    if (sscanf(request.data, "%19[^&]&%32s", fileSizeStr, md5Sum) != 2) {
+                        logError("[ERROR]: Trama 0x04 de Harley con formato inválido.");
+                        continue;
+                    }
+
+                    logInfo("[INFO]: Información del archivo distorsionado recibida.");
+                    logInfo("[INFO]: Tamaño del archivo distorsionado:");
+                    logInfo(fileSizeStr);
+                    logInfo("[INFO]: MD5 del archivo distorsionado:");
+                    logInfo(md5Sum);
+
+                    snprintf(filePath, sizeof(filePath), "%s%s", FILE_PATH, distortedFileName);
+                    logInfo("[INFO]: Reemplazando archivo en:");
+                    logInfo(filePath);
+                }
+
+                if (request.type == 0x06) { // Confirmación de MD5
+                    logInfo("[INFO]: Respuesta 0x06 recibida de Harley:");
+                    logInfo(request.data);
+                }
             }
 
-            default:
-                logWarning("[WARNING]: Trama desconocida recibida de Harley.");
-                break;
         }
     }
 
     logInfo("[INFO]: Finalizando escucha de Harley.");
     return NULL;
 }
+
 
 //LLancem thread per iniciar un nou fil que envïi la trama 0x05 amb longitud data 247 per parts.
 void *sendFileChunks(void *args) {
@@ -488,8 +485,6 @@ void *sendFileChunks(void *args) {
     }
 
     pthread_detach(listenThread); // Liberar automáticamente el hilo al finalizar
-    logInfo("[INFO]: Hilo iniciado para escuchar respuestas de Harley.");
-
     return NULL;
 }
 
@@ -542,10 +537,6 @@ void sendDistortFileRequest(int workerSocket, const char *fileName, off_t fileSi
 
     if (strcmp(response.data, "CON_KO") == 0) {
         logError("[ERROR]: Worker rechazó la conexión.");
-        free(filePath);
-        return;
-    } else {
-        logError("[ERROR]: Respuesta inesperada del Worker.");
         free(filePath);
         return;
     }

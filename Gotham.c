@@ -1039,7 +1039,6 @@ int main(int argc, char *argv[]) {
         if (FD_ISSET(server_fds.server_fd_fleck, &read_fds)) {
             int client_fd = accept_connection(server_fds.server_fd_fleck);
             if (client_fd >= 0) {
-                logInfo("[INFO]: Conexión aceptada desde Fleck.");
                 pthread_t thread;
                 ConnectionArgs *args = malloc(sizeof(ConnectionArgs));
                 if (!args) {
