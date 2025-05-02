@@ -25,6 +25,7 @@ void serialize_frame(const Frame *frame, char *buffer);
 int deserialize_frame(const char *buffer, Frame *frame);
 int send_frame(int socket_fd, const Frame *frame);
 int receive_frame(int socket_fd, Frame *frame);
+int receive_any_frame(int socket_fd, void *frame, int *is_binary);
 uint16_t calculate_checksum(const char *data, size_t length, int include_null);
 void get_timestamp(char *timestamp);
 

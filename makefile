@@ -12,16 +12,18 @@
 
 # Variables
 CC = gcc
-CFLAGS = -Wall -Wextra -IFileReader -IStringUtils -IDataConversion -INetworking -IFrameUtils -ILogging -IMD5SUM -IFrameUtilsBinary -IGestorTramas -IMessageQueue
+CFLAGS = -Wall -Wextra -pthread -lrt -IFileReader -IStringUtils -IDataConversion -INetworking -IFrameUtils -ILogging -IMD5SUM -IFrameUtilsBinary -IGestorTramas -IMessageQueue -ICleanFIles -IShared_Memory -ISemafors
 
 # Comunes
 COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c \
          GestorTramas/GestorTramas.c Networking/Networking.c FrameUtils/FrameUtils.c \
-         Logging/Logging.c MD5SUM/md5Sum.c FrameUtilsBinary/FrameUtilsBinary.c MessageQueue/MessageQueue.c\
+         Logging/Logging.c MD5SUM/md5Sum.c FrameUtilsBinary/FrameUtilsBinary.c \
+         MessageQueue/MessageQueue.c CleanFiles/CleanFiles.c Shared_Memory/Shared_memory.c \
+		 HarleySync/HarleySync.c Semafors/semaphore_v2.c
 
 # Objectius per compilar cada executable
-all: Fleck_Montserrat.exe Fleck_Matagalls.exe Harley_Montserrat.exe Harley_Matagalls.exe \
-     Harley_Puigpedros.exe Enigma_Puigpedros.exe Gotham_Montserrat.exe
+all: Fleck_Montserrat.exe Fleck_Montserrat1.exe Harley_Matagalls.exe \
+     Enigma_Puigpedros.exe Gotham_Montserrat.exe Harley_Matagalls1.exe
 
 # Compilació de Gotham a Montserrat
 Gotham_Montserrat.exe: Gotham.c $(COMMON)
@@ -31,17 +33,9 @@ Gotham_Montserrat.exe: Gotham.c $(COMMON)
 Fleck_Montserrat.exe: Fleck.c $(COMMON)
 	$(CC) $(CFLAGS) Fleck.c $(COMMON) -o Fleck_Montserrat.exe
 
-# Compilació de Fleck a Matagalls
-Fleck_Matagalls.exe: Fleck.c $(COMMON)
-	$(CC) $(CFLAGS) Fleck.c $(COMMON) -o Fleck_Matagalls.exe
-
 # Compilació de Harley a Matagalls
-Harley_Matagalls.exe: Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c
-	$(CC) $(CFLAGS) Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c -o Harley_Matagalls.exe -lm
-
-# Compilació de Harley a Puigpedros
-Harley_Puigpedros.exe: Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c
-	$(CC) $(CFLAGS) Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c -o Harley_Puigpedros.exe -lm
+Harley_Matagalls.exe: Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c 
+	$(CC) $(CFLAGS) Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c -o Harley_Matagalls.exe -lm -lpthread
 
 # Compilació de Enigma a Puigpedros
 Enigma_Puigpedros.exe: Enigma.c $(COMMON)
@@ -60,17 +54,17 @@ fm: Fleck_Montserrat.exe
 vfm: Fleck_Montserrat.exe
 	valgrind --dsymutil=yes --track-origins=yes --leak-check=full --track-fds=yes --show-reachable=yes -s ./Fleck_Montserrat.exe fitxers_configuració/config_fleck.dat
 
-fma: Fleck_Matagalls.exe
-	./Fleck_Matagalls.exe fitxers_configuració/config_fleck1.dat
+fm1: Fleck_Montserrat.exe
+	./Fleck_Montserrat.exe fitxers_configuració/config_fleck1.dat
 
 hma: Harley_Matagalls.exe
+	./Harley_Matagalls.exe fitxers_configuració/config_harley.dat
+	
+hma1: Harley_Matagalls.exe
 	./Harley_Matagalls.exe fitxers_configuració/config_harley1.dat
 
 vhma: Harley_Matagalls.exe
 	valgrind --dsymutil=yes --track-origins=yes --leak-check=full --track-fds=yes --show-reachable=yes -s ./Harley_Matagalls.exe fitxers_configuració/config_harley1.dat
-
-hpp: Harley_Puigpedros.exe
-	./Harley_Puigpedros.exe fitxers_configuració/config_harley_pp.dat
 
 ep: Enigma_Puigpedros.exe
 	./Enigma_Puigpedros.exe fitxers_configuració/config_enigma.dat

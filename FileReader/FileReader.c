@@ -150,9 +150,12 @@ void readConfigFileGeneric(const char *configFile, void *configStruct, ConfigTyp
 
     close(fd);
 
-    printF("Configuració llegida:\n");
     switch (configType) {
         case CONFIG_ENIGMA: {
+            printF("Reading configuration file\n");
+            printF("Connecting Enigma worker to the system..\n");
+            printF("Connected to Mr. J System, ready to listen to Fleck petitions\n\n");
+            printF("Waiting for connections...\n");
             EnigmaConfig *config = (EnigmaConfig *)configStruct;
             printF("IP Gotham - "); printF(config->ipGotham);
 
@@ -172,6 +175,7 @@ void readConfigFileGeneric(const char *configFile, void *configStruct, ConfigTyp
         }
         case CONFIG_HARLEY: {
             HarleyConfig *config = (HarleyConfig *)configStruct;
+            printF("Reading configuration file\n");
             printF("IP Gotham - "); printF(config->ipGotham);
 
             printF("\nPort Gotham - ");
@@ -190,6 +194,9 @@ void readConfigFileGeneric(const char *configFile, void *configStruct, ConfigTyp
         }
         case CONFIG_GOTHAM: {
             GothamConfig *config = (GothamConfig *)configStruct;
+            printF("Reading configuration file\n\n");
+            printF("Gotham server initialized\n\n");
+            printF("Waiting for connections...\n");
             printF("IP Fleck - "); printF(config->ipFleck);
 
             printF("\nPort Fleck - ");

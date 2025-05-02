@@ -36,7 +36,7 @@ volatile sig_atomic_t stop_server = 0; // Bandera para indicar el cierre
 
 typedef struct {
     int server_fd_fleck;
-    int server_fd_enigma;
+    int server_fd_worker;
 } ServerFds;
 
 static ServerFds *global_server_fds = NULL;
@@ -92,6 +92,7 @@ int logoutWorkerBySocket(int socket_fd, WorkerManager *manager);
 WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager);
 void handleDisconnectFrame(const Frame *frame, int client_fd, WorkerManager *manager, ClientManager *clientManager);
 ClientManager *createClientManager();
+void reasignarWorkersPrincipales(WorkerManager *manager);
 void freeClientManager(ClientManager *manager);
 void addClient(ClientManager *manager, const char *username, const char *ip, int socket_fd);
 void removeClientBySocket(ClientManager *manager, int socket_fd);
@@ -100,42 +101,50 @@ void handleSigint(int sig);
 void alliberarMemoria(GothamConfig *gothamConfig);
 
 void *enviarHeartbeat(void *arg) {
-    WorkerManager *workerManager = (WorkerManager *)arg;
+    ConnectionArgs *args = (ConnectionArgs *)arg;
+    WorkerManager *workerManager = args->workerManager;
+    ClientManager *clientManager = args->clientManager;
 
     while (!stop_server) {
         Frame heartbeat = {0};
         heartbeat.type = 0x12; // Tipo HEARTBEAT
-        heartbeat.data_length = 0; // Sin datos adicionales
-        heartbeat.timestamp = (uint32_t)time(NULL); // Marca de tiempo actual
+        heartbeat.data_length = 0;
+        heartbeat.timestamp = (uint32_t)time(NULL);
 
-        // Enviar a todos los clientes conectados (Fleck)
-        pthread_mutex_lock(&clientManager->mutex);
-        for (int i = 0; i < clientManager->clientCount; i++) {
-            int clientSocket = clientManager->clients[i].socket_fd;
-            if (escribirTrama(clientSocket, &heartbeat) < 0) {
-                logError("[ERROR]: Error enviando HEARTBEAT a cliente.");
-            } else {
-                logInfo("[INFO]: HEARTBEAT enviado a cliente.");
+        // Depuración para asegurar acceso correcto
+        if (!clientManager) {
+            customPrintf("[ERROR]: ClientManager es NULL en el hilo de HEARTBEAT.");
+        } else {
+            pthread_mutex_lock(&clientManager->mutex);
+            for (int i = 0; i < clientManager->clientCount; i++) {
+                int clientSocket = clientManager->clients[i].socket_fd;
+                if (escribirTrama(clientSocket, &heartbeat) < 0) {
+                    customPrintf("[ERROR]: Error enviando HEARTBEAT a cliente.");
+                }
             }
+            pthread_mutex_unlock(&clientManager->mutex);
         }
-        pthread_mutex_unlock(&clientManager->mutex);
 
-        // Enviar a todos los workers conectados (Harley y Enigma)
-        pthread_mutex_lock(&workerManager->mutex);
-        for (int i = 0; i < workerManager->workerCount; i++) {
-            WorkerInfo *worker = &workerManager->workers[i];
-            if (escribirTrama(worker->socket_fd, &heartbeat) < 0) {
-                logError("[ERROR]: Error enviando HEARTBEAT a worker.");
-            } else {
-                logInfo("[INFO]: HEARTBEAT enviado a worker.");
+        if (!workerManager) {
+            customPrintf("[ERROR]: WorkerManager es NULL en el hilo de HEARTBEAT.");
+        } else {
+            pthread_mutex_lock(&workerManager->mutex);
+            for (int i = 0; i < workerManager->workerCount; i++) {
+                WorkerInfo *worker = &workerManager->workers[i];
+                if (escribirTrama(worker->socket_fd, &heartbeat) < 0) {
+                    customPrintf("[ERROR]: Error enviando HEARTBEAT a worker.");
+                    // Cerrar socket y eliminar worker
+                    close(worker->socket_fd);
+                    logoutWorkerBySocket(worker->socket_fd, workerManager);
+                    i--;  // Ajustar índice tras eliminar worker
+                }
             }
+            pthread_mutex_unlock(&workerManager->mutex);
         }
-        pthread_mutex_unlock(&workerManager->mutex);
 
-        sleep(1); // Esperar 1 segundo antes del siguiente HEARTBEAT
+        sleep(1); // Esperar antes del siguiente HEARTBEAT
     }
 
-    logInfo("[INFO]: Hilo de HEARTBEAT finalizado.");
     return NULL;
 }
 
@@ -173,7 +182,7 @@ void freeClientManager(ClientManager *manager) {
         }
         pthread_mutex_destroy(&manager->mutex); // Destruir el mutex
         free(manager); // Liberar la estructura principal
-        logInfo("[DEBUG]: ClientManager liberado correctamente.");
+        customPrintf("[DEBUG]: ClientManager liberado correctamente.");
     }
 }
 
@@ -186,7 +195,7 @@ void addClient(ClientManager *manager, const char *username, const char *ip, int
         if (strcmp(manager->clients[i].username, username) == 0) {
             strncpy(manager->clients[i].ip, ip, sizeof(manager->clients[i].ip) - 1);
             manager->clients[i].socket_fd = socket_fd;
-            logInfo("[INFO]: Cliente existente actualizado.");
+            customPrintf("\n[INFO]: Cliente existente actualizado.\n");
             pthread_mutex_unlock(&manager->mutex);
             return;
         }
@@ -197,7 +206,7 @@ void addClient(ClientManager *manager, const char *username, const char *ip, int
         manager->capacity *= 2;
         ClientInfo *new_clients = realloc(manager->clients, manager->capacity * sizeof(ClientInfo));
         if (!new_clients) {
-            logError("[ERROR]: Error al ampliar la capacidad de clientes.");
+            customPrintf("[ERROR]: Error al ampliar la capacidad de clientes.");
             pthread_mutex_unlock(&manager->mutex);
             return;
         }
@@ -225,7 +234,7 @@ void removeClientBySocket(ClientManager *manager, int socket_fd) {
                 manager->clients[i] = manager->clients[manager->clientCount - 1];
             }
             manager->clientCount--;
-            logInfo("[INFO]: Cliente eliminado de la lista.");
+            customPrintf("[INFO]: Cliente eliminado de la lista.");
             break;
         }
     }
@@ -238,15 +247,13 @@ void listClients(ClientManager *manager) {
     pthread_mutex_lock(&manager->mutex);
 
     if (manager->clientCount == 0) {
-        logInfo("No hay clientes conectados.");
+        customPrintf("No hay clientes conectados.");
     } else {
-        logInfo("Lista de clientes conectados:");
+        customPrintf("\nLista de clientes conectados: \n");
         for (int i = 0; i < manager->clientCount; i++) {
             ClientInfo *client = &manager->clients[i];
-            char log_message[256];
-            snprintf(log_message, sizeof(log_message), "Cliente %d: Usuario: %s, IP: %s, Socket: %d",
+            customPrintf("\nCliente %d: Usuario: %s, IP: %s, Socket: %d\n",
                      i + 1, client->username, client->ip, client->socket_fd);
-            logInfo(log_message);
         }
     }
 
@@ -286,7 +293,7 @@ WorkerManager *createWorkerManager() {
 void listarWorkers(WorkerManager *manager) {
     pthread_mutex_lock(&manager->mutex); // Asegura acceso seguro a la lista dinámica
 
-    logInfo("[INFO]: Lista de workers registrados: ");
+    customPrintf("\n[INFO]: Lista de workers registrados: \n");
     for (int i = 0; i < manager->workerCount; i++) {
         WorkerInfo *worker = &manager->workers[i];
         char *log_message;
@@ -301,17 +308,15 @@ void listarWorkers(WorkerManager *manager) {
 
 void registrarWorker(const char *payload, WorkerManager *manager, int client_fd) {
     if (!manager || !payload) {
-        logError("[ERROR]: Parámetros inválidos en registrarWorker.");
+        customPrintf("[ERROR]: Parámetros inválidos en registrarWorker.");
         return;
     }
-
-    logInfo("[INFO]: Iniciando el registro del worker...\n");
 
     char type[10] = {0}, ip[16] = {0};
     int port = 0;
 
     if (sscanf(payload, "%9[^&]&%15[^&]&%d", type, ip, &port) != 3) {
-        logError("[ERROR]: Payload inválido (esperado TYPE&IP&PORT).");
+        customPrintf("[ERROR]: Payload inválido (esperado TYPE&IP&PORT).");
         Frame response = {0};
         response.type = 0x02;
         strncpy(response.data, "CON_KO", sizeof(response.data) - 1);
@@ -323,17 +328,35 @@ void registrarWorker(const char *payload, WorkerManager *manager, int client_fd)
 
     pthread_mutex_lock(&manager->mutex);
 
+    //Verificar si el worker ya está registrado
+    for (int i = 0; i < manager->workerCount; i++) {
+        if (strcmp(manager->workers[i].ip, ip) == 0 && manager->workers[i].port == port) {
+            logWarning("[WARNING]: Worker ya registrado. Actualizando socket...");
+            manager->workers[i].socket_fd = client_fd;  // 🔄 **Actualizar socket en vez de duplicar**
+            pthread_mutex_unlock(&manager->mutex);
+            
+            // Responder con éxito sin volver a añadirlo
+            Frame response = {0};
+            response.type = 0x02;
+            response.data_length = 0;
+            response.checksum = calculate_checksum(response.data, response.data_length, 1);
+            escribirTrama(client_fd, &response);
+            return;
+        }
+    }
+
     // Ampliar capacidad si es necesario
     if (manager->workerCount == manager->capacity) {
-        logInfo("[DEBUG]: Ampliando capacidad del WorkerManager...");
-        manager->capacity *= 2;
-        WorkerInfo *temp = realloc(manager->workers, manager->capacity * sizeof(WorkerInfo));
+        customPrintf("[DEBUG]: Ampliando capacidad del WorkerManager...");
+        int new_capacity = manager->capacity *= 2;
+        WorkerInfo *temp = realloc(manager->workers, new_capacity * sizeof(WorkerInfo));
         if (!temp) {
-            logError("[ERROR]: Fallo al ampliar la capacidad de WorkerManager.");
+            customPrintf("[ERROR]: Fallo al ampliar la capacidad de WorkerManager.");
             pthread_mutex_unlock(&manager->mutex);
             return;
         }
         manager->workers = temp;
+        manager->capacity = new_capacity;
     }
 
     // Registrar nuevo worker
@@ -365,13 +388,13 @@ void registrarWorker(const char *payload, WorkerManager *manager, int client_fd)
 
 WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager) {
     if (!filename || !manager) {
-        logError("[ERROR]: Nombre de archivo o manager inválido.\n");
+        customPrintf("[ERROR]: Nombre de archivo o manager inválido.\n");
         return NULL;
     }
 
     char *extension = strrchr(filename, '.');
     if (!extension) {
-        logError("[ERROR]: No se pudo determinar la extensión del archivo.\n");
+        customPrintf("[ERROR]: No se pudo determinar la extensión del archivo.\n");
         return NULL;
     }
 
@@ -382,30 +405,30 @@ WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager) {
     if (strcasecmp(extension, ".txt") == 0) {
         if (manager->mainTextWorker && manager->mainTextWorker->ip[0] != '\0') {
             targetWorker = manager->mainTextWorker;
-            logInfo("[INFO]: Worker principal asignado para archivos de texto.\n");
+            customPrintf("\n[INFO]: Worker principal asignado para archivos de texto.\n");
         } else {
-            logError("[ERROR]: No hay un Worker principal asignado para archivos de texto.\n");
+            customPrintf("[ERROR]: No hay un Worker principal asignado para archivos de texto.\n");
         }
     } else if (strcasecmp(extension, ".wav") == 0 || strcasecmp(extension, ".png") == 0 || strcasecmp(extension, ".jpg") == 0) {
         if (manager->mainMediaWorker && manager->mainMediaWorker->ip[0] != '\0') {
             targetWorker = manager->mainMediaWorker;
-            logInfo("[INFO]: Worker principal asignado para archivos multimedia.\n");
+            customPrintf("\n[INFO]: Worker principal asignado para archivos multimedia.\n");
         } else {
-            logError("[ERROR]: No hay un Worker principal asignado para archivos multimedia.\n");
+            customPrintf("[ERROR]: No hay un Worker principal asignado para archivos multimedia.\n");
         }
     } else {
-        logError("[ERROR]: Extensión no reconocida.\n");
+        customPrintf("[ERROR]: Extensión no reconocida.\n");
     }
 
     if (!targetWorker) {
-        logError("[ERROR]: No hay workers disponibles para el tipo de archivo.\n");
+        customPrintf("[ERROR]: No hay workers disponibles para el tipo de archivo.\n");
         pthread_mutex_unlock(&manager->mutex);
         return NULL;
     }
 
     // Validar los campos del Worker antes de usarlo
     if (targetWorker->ip[0] == '\0' || targetWorker->port <= 0) {
-        logError("[ERROR]: Worker tiene datos inválidos.\n");
+        customPrintf("[ERROR]: Worker tiene datos inválidos.\n");
         pthread_mutex_unlock(&manager->mutex);
         return NULL;
     }
@@ -416,7 +439,7 @@ WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager) {
                  targetWorker->ip, targetWorker->port);
         printF(log_message);
     } else {
-        logError("[ERROR]: No hay workers disponibles para el tipo de archivo.\n");
+        customPrintf("[ERROR]: No hay workers disponibles para el tipo de archivo.\n");
     }
 
     pthread_mutex_unlock(&manager->mutex);
@@ -425,7 +448,7 @@ WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager) {
 
 void asignarNuevoWorkerPrincipal(WorkerInfo *worker) {
     if (!worker) {
-        logError("[ERROR]: Worker no válido para asignar como principal.");
+        customPrintf("[ERROR]: Worker no válido para asignar como principal.");
         return;
     }
 
@@ -435,11 +458,11 @@ void asignarNuevoWorkerPrincipal(WorkerInfo *worker) {
     frame.timestamp = (uint32_t)time(NULL);
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
-    logInfo("[INFO]: Asignando nuevo Worker principal...");
+    customPrintf("\n[INFO]: Asignando nuevo Worker principal...\n");
     if (escribirTrama(worker->socket_fd, &frame) == 0) {
         logSuccess("[SUCCESS]: Trama 0x08 enviada correctamente al Worker principal.");
     } else {
-        logError("[ERROR]: Error enviando la trama 0x08 al Worker principal.");
+        customPrintf("[ERROR]: Error enviando la trama 0x08 al Worker principal.");
     }
 }
 
@@ -450,6 +473,9 @@ int logoutWorkerBySocket(int socket_fd, WorkerManager *manager) {
     for (int i = 0; i < manager->workerCount; i++) {
         if (manager->workers[i].socket_fd == socket_fd) {
             found = 1;
+
+            close(manager->workers[i].socket_fd);
+            manager->workers[i].socket_fd = -1;
 
             // Si es principal, reasignar
             if (manager->mainTextWorker == &manager->workers[i]) {
@@ -469,19 +495,16 @@ int logoutWorkerBySocket(int socket_fd, WorkerManager *manager) {
     }
 
     pthread_mutex_unlock(&manager->mutex);
-
-    if (!found) {
-        logWarning("[WARNING]: Worker no encontrado con el socket proporcionado.");
-        return -1;
+    if (found) {
+        reasignarWorkersPrincipales(manager);
     }
 
-    logInfo("[INFO]: Worker eliminado correctamente.");
-    return 0;
+    return found ? 0 : -1;
 }
 
 void reasignarWorkersPrincipales(WorkerManager *manager) {
     if (!manager || !manager->workers) {
-        logError("[ERROR]: WorkerManager o la lista de Workers es NULL.");
+        customPrintf("[ERROR]: WorkerManager o la lista de Workers es NULL.");
         return;
     }
 
@@ -490,57 +513,17 @@ void reasignarWorkersPrincipales(WorkerManager *manager) {
     for (int i = 0; i < manager->workerCount; i++) {
         if (manager->mainTextWorker == NULL && strcasecmp(manager->workers[i].type, "TEXT") == 0) {
             manager->mainTextWorker = &manager->workers[i];
-            logInfo("[INFO]: Nuevo Worker principal de texto asignado.");
+            customPrintf("\n[INFO]: Nuevo Worker principal de texto asignado.\n");
             asignarNuevoWorkerPrincipal(manager->mainTextWorker);
         }
         if (manager->mainMediaWorker == NULL && strcasecmp(manager->workers[i].type, "MEDIA") == 0) {
             manager->mainMediaWorker = &manager->workers[i];
-            logInfo("[INFO]: Nuevo Worker principal de multimedia asignado.");
+            customPrintf("\n[INFO]: Nuevo Worker principal de multimedia asignado.\n");
             asignarNuevoWorkerPrincipal(manager->mainMediaWorker);
         }
     }
 
     pthread_mutex_unlock(&manager->mutex);
-}
-
-
-void handleWorkerFailure(const char *mediaType, WorkerManager *manager, int client_fd) {
-    if (!mediaType || !manager) {
-        logError("[ERROR]: Parámetros inválidos en handleWorkerFailure.\n");
-        return;
-    }
-
-    logError("[ERROR]: Worker falló durante la operación DISTORT.\n");
-
-    pthread_mutex_lock(&manager->mutex);
-
-    WorkerInfo *newWorker = NULL;
-    for (int i = 0; i < manager->workerCount; i++) {
-        WorkerInfo *worker = &manager->workers[i];
-        if (strcasecmp(worker->type, mediaType) == 0) {
-            newWorker = worker;
-            break;
-        }
-    }
-
-    pthread_mutex_unlock(&manager->mutex);
-
-    Frame response = {0};
-    response.type = 0x11; // Tipo de trama para la reasignación
-    if (newWorker) {
-        snprintf(response.data, sizeof(response.data), "%s&%d", newWorker->ip, newWorker->port);
-        response.data_length = strlen(response.data);
-    } else {
-        logError("[ERROR]: No hay Workers disponibles para reasignar.");
-        strncpy(response.data, "DISTORT_KO", sizeof(response.data) - 1);
-        response.data_length = strlen(response.data);
-    }
-    response.timestamp = (uint32_t)time(NULL);
-    response.checksum = calculate_checksum(response.data, response.data_length, 0);
-
-    if (escribirTrama(client_fd, &response) != 0) {
-        logError("[ERROR]: Error enviando la trama de reasignación al cliente.");
-    }
 }
 
 // Allibera la memòria utilitzada pel WorkerManager
@@ -551,7 +534,7 @@ void freeWorkerManager(WorkerManager *manager) {
         }
         pthread_mutex_destroy(&manager->mutex); // Destruir el mutex
         free(manager); // Liberar la estructura principal
-        logInfo("[DEBUG]: WorkerManager liberado correctamente.");
+        customPrintf("[DEBUG]: WorkerManager liberado correctamente.");
     }
 }
 
@@ -567,7 +550,7 @@ void *gestionarConexion(void *arg) {
     args = NULL; // Asegurarnos de que no sea usado accidentalmente
 
     if (!workerManager || !clientManager) {
-        logError("[ERROR]: WorkerManager o ClientManager NULL en gestionarConexion.");
+        customPrintf("[ERROR]: WorkerManager o ClientManager NULL en gestionarConexion.");
         close(client_fd);
         return NULL;
     }
@@ -577,7 +560,7 @@ void *gestionarConexion(void *arg) {
 
     // Manejo de frames inicial
     if (leerTrama(client_fd, &frame) != 0) {
-        logError("[ERROR]: Error al recibir el primer frame del cliente.");
+        customPrintf("[ERROR]: Error al recibir el primer frame del cliente.");
         close(client_fd);
         return NULL;
     }
@@ -587,12 +570,30 @@ void *gestionarConexion(void *arg) {
     // Bucle principal para manejar los frames del cliente
     while (!stop_server) { // Verifica la bandera global para el cierre del servidor
         if (leerTrama(client_fd, &frame) != 0) {
-            logInfo("[INFO]: El cliente cerró la conexión o hubo un error.");
-            break;
-        }
+            customPrintf("\n[INFO]: Cliente o Worker desconectado.\n");
+            
+            // Determinar si es Worker o Cliente y eliminarlo
+            pthread_mutex_lock(&workerManager->mutex);
+            int esWorker = 0;
+            for (int i = 0; i < workerManager->workerCount; i++) {
+                if (workerManager->workers[i].socket_fd == client_fd) {
+                    esWorker = 1;
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&workerManager->mutex);
 
+            if (esWorker) {
+                logoutWorkerBySocket(client_fd, workerManager);
+            } else {
+                removeClientBySocket(clientManager, client_fd);
+            }
+
+            close(client_fd);
+            return NULL;
+        }
         if (frame.type == 0x07) { // Trama de desconexión explícita del cliente
-            logInfo("[DEBUG]: Trama de desconexión recibida.");
+            customPrintf("\n[DEBUG]: Trama de desconexión recibida.\n");
             handleDisconnectFrame(&frame, client_fd, workerManager, clientManager);
             disconnectHandled = 1;
             break;
@@ -604,7 +605,7 @@ void *gestionarConexion(void *arg) {
 
     // Si el servidor está en proceso de cierre, gestionar recursos del cliente
     if (stop_server && !disconnectHandled) {
-        logInfo("[INFO]: Finalizando conexión por cierre del servidor.");
+        customPrintf("\n[INFO]: Finalizando conexión por cierre del servidor.\n");
         removeClientBySocket(clientManager, client_fd);
     } else if (!disconnectHandled) {
         removeClientBySocket(clientManager, client_fd);
@@ -626,25 +627,9 @@ void *gestionarConexion(void *arg) {
 ************************************************/
 void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *manager, ClientManager *clientManager) {
     if (!frame) {
-        logError("El frame rebut és NULL.");
+        customPrintf("El frame rebut és NULL.");
         return;
     }
-
-    // Validar el checksum del frame rebut
-    uint16_t calculated_checksum;
-
-    if (frame->type == 0x07) {
-        calculated_checksum = calculate_checksum(frame->data, frame->data_length, 1);
-    } else {
-        calculated_checksum = calculate_checksum(frame->data, frame->data_length, 0);
-    }
-   
-    if (calculated_checksum != frame->checksum) {
-        logError("Trama amb checksum invàlid.");
-        return;
-    }
-
-    logSuccess("Checksum correcte.");
 
     // Estructura per preparar la resposta
     Frame response = {0};
@@ -652,14 +637,12 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
 
     switch (frame->type) {
         case 0x01: // CONNECT
-            logInfo("[INFO]: Procesando conexión de Fleck...\n");
-
             // Parsear los datos de la conexión (nombre de usuario, IP y puerto)
             char username[64] = {0}, ip[16] = {0};
             int port = 0;
 
             if (sscanf(frame->data, "%63[^&]&%15[^&]&%d", username, ip, &port) != 3) {
-                logError("[ERROR]: Formato de datos de conexión inválido.");
+                customPrintf("[ERROR]: Formato de datos de conexión inválido.");
                 response.type = 0x01;
                 strncpy(response.data, "CON_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
@@ -671,12 +654,6 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             // Registrar al cliente en el ClientManager
             addClient(clientManager, username, ip, client_fd);
 
-            char log_message[256];
-            snprintf(log_message, sizeof(log_message),
-                    "[DEBUG]: Cliente conectado:  \nUsuario: %s, IP: %s, Puerto: %d, Socket: %d\n",
-                    username, ip, port, client_fd);
-            logInfo(log_message);
-
             // Enviar respuesta de éxito
             response.type = 0x01;
             response.data[0] = '\0'; // Configurar datos como vacío
@@ -686,34 +663,27 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             break;
 
         case 0x02: // REGISTER
-            logInfo("[DEBUG]: Processant registre de worker...\n");
+            customPrintf("\n[DEBUG]: Processant registre de worker...\n");
             registrarWorker(frame->data, manager, client_fd);
             listarWorkers(manager);
             break;
 
         case 0x07:
-            logInfo("[INFO]: Trama de desconexión recibida.");
+            customPrintf("\n[INFO]: Trama de desconexión recibida.\n");
 
             // Llamamos a la función centralizada para manejar desconexión
             handleDisconnectFrame(frame, client_fd, manager, clientManager);
-
-            // Confirmar desconexión al cliente/worker
-            response.type = 0x07;
-            strncpy(response.data, "DISCONNECT_OK", sizeof(response.data) - 1);
-            response.data_length = strlen(response.data);
-            response.checksum = calculate_checksum(response.data, response.data_length, 0);
-            escribirTrama(client_fd, &response);
 
             close(client_fd);
             break;
 
         case 0x10: // DISTORT
-            logInfo("[INFO]: Procesando comando DISTORT...\n");
+            customPrintf("\n[INFO]: Procesando comando DISTORT...\n");
 
             // Parsear el payload recibido: mediaType y fileName
             char mediaType[10], fileName[256];
             if (sscanf(frame->data, "%9[^&]&%255s", mediaType, fileName) != 2) {
-                logError("[ERROR]: Formato de datos incorrecto en comando DISTORT.");
+                customPrintf("[ERROR]: Formato de datos incorrecto en comando DISTORT.");
                 response.type = 0x10;
                 strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
@@ -728,7 +698,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
                 (strcasecmp(mediaType, "TEXT") == 0 && strcasecmp(fileExtension, ".txt") != 0) ||
                 (strcasecmp(mediaType, "MEDIA") == 0 && strcasecmp(fileExtension, ".wav") != 0 &&
                 strcasecmp(fileExtension, ".png") != 0 && strcasecmp(fileExtension, ".jpg") != 0)) {
-                logError("[ERROR]: Extensión de archivo no válida o no coincide con mediaType.\n");
+                customPrintf("[ERROR]: Extensión de archivo no válida o no coincide con mediaType.\n");
                 response.type = 0x10;
                 strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
@@ -738,26 +708,11 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             }
 
             // Buscar worker adecuado
-            WorkerInfo *targetWorker = buscarWorker(fileName, manager);
-            if (targetWorker) {
-                logInfo("[DEBUG]: Worker encontrado:");
-                char debug_message[256];
-                snprintf(debug_message, sizeof(debug_message), "IP: %s, Port: %d, FD: %d", targetWorker->ip, targetWorker->port, targetWorker->socket_fd);
-                logInfo(debug_message);
-            }
+            WorkerInfo *targetWorker = buscarWorker(fileName, manager);           
             if (!targetWorker) {
-                logError("[ERROR]: No se encontró un worker para el archivo especificado.\n");
-                handleWorkerFailure(mediaType, manager, client_fd);
+                customPrintf("[ERROR]: No se encontró un worker para el archivo especificado.\n");
+                //handleWorkerFailure(mediaType, manager, client_fd);
                 break;
-            }
-
-
-            // Validar worker antes de usarlo
-            if (targetWorker == NULL || targetWorker->ip[0] == '\0') {
-                logError("[ERROR]: Worker inválido después de buscarWorker.\n");
-                // Intentar reasignación si es posible
-                handleWorkerFailure(mediaType, manager, client_fd);
-                break; // Terminar después de manejar la reasignación
             }
 
             // Preparar respuesta con la información del Worker
@@ -769,13 +724,13 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             break;
 
         case 0x11: //REASINGAR WORKER
-            logInfo("[INFO]: Procesando solicitud de reasignación de Worker...\n");
+            customPrintf("\n[INFO]: Procesando solicitud de reasignación de Worker...\n");
 
             // Parsear datos: <mediaType>&<FileName>
             char mediaType0x11[10] = {0};
             char fileName0x11[256] = {0};
             if (sscanf(frame->data, "%9[^&]&%255s", mediaType0x11, fileName0x11) != 2) {
-                logError("[ERROR]: Formato inválido en la solicitud de reasignación.\n");
+                customPrintf("[ERROR]: Formato inválido en la solicitud de reasignación.\n");
                 response.type = 0x11;
                 strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
@@ -792,7 +747,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
                 strcasecmp(fileExtension0x11, ".wav") != 0 &&
                 strcasecmp(fileExtension0x11, ".png") != 0 &&
                 strcasecmp(fileExtension0x11, ".jpg") != 0)) {
-                logError("[ERROR]: Extensión de archivo no válida o no coincide con el mediaType.\n");
+                customPrintf("[ERROR]: Extensión de archivo no válida o no coincide con el mediaType.\n");
                 response.type = 0x11;
                 strncpy(response.data, "MEDIA_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
@@ -804,7 +759,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             // Buscar un Worker disponible
             WorkerInfo *targetWorkerCaiguda = buscarWorker(fileName0x11, manager);
             if (!targetWorkerCaiguda) {
-                logError("[ERROR]: No hay Workers disponibles para el tipo especificado.\n");
+                customPrintf("[ERROR]: No hay Workers disponibles para el tipo especificado.\n");
                 response.type = 0x11;
                 strncpy(response.data, "DISTORT_KO", sizeof(response.data) - 1);
                 response.data_length = strlen(response.data);
@@ -821,12 +776,12 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             response.data_length = strlen(response.data);
             response.checksum = calculate_checksum(response.data, response.data_length, 0);
 
-            logInfo("[INFO]: Enviando información del Worker reasignado...\n");
+            customPrintf("\n[INFO]: Enviando información del Worker reasignado...\n");
             escribirTrama(client_fd, &response);
             break;
 
         default: // Comanda desconeguda
-            logError("Comanda desconeguda rebuda.\n");
+            customPrintf("Comanda desconeguda rebuda.\n");
             enviarTramaError(client_fd);
             break;
     }
@@ -834,12 +789,13 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
 
 void handleDisconnectFrame(const Frame *frame, int client_fd, WorkerManager *manager, ClientManager *clientManager) {
     if (!frame || !manager || !clientManager) {
-        logError("[ERROR]: Parámetros inválidos en handleDisconnectFrame.");
+        customPrintf("[ERROR]: Parámetros inválidos en handleDisconnectFrame.");
         return;
     }
 
     int isWorker = 0;
     int isClient = 0;
+    WorkerInfo *disconnectedWorker = NULL; // ✅ Definir antes de usar
 
     // Verificar si es un Worker
     pthread_mutex_lock(&manager->mutex);
@@ -864,26 +820,34 @@ void handleDisconnectFrame(const Frame *frame, int client_fd, WorkerManager *man
     pthread_mutex_unlock(&clientManager->mutex);
 
     if (isWorker) {
-        logInfo("[INFO]: Identificado como Worker. Procesando desconexión...");
-        if (logoutWorkerBySocket(client_fd, manager) == 0) {
-            logInfo("[INFO]: Worker desconectado correctamente.");
-            reasignarWorkersPrincipales(manager);
+        pthread_mutex_lock(&manager->mutex);
+        for (int i = 0; i < manager->workerCount; i++) {
+            if (manager->workers[i].socket_fd == client_fd) {
+                disconnectedWorker = &manager->workers[i];
+                break;
+            }
         }
-    } else if (isClient) {
-        logInfo("[INFO]: Identificado como Cliente. Procesando desconexión...");
-        removeClientBySocket(clientManager, client_fd);
-    } else {
-        logWarning("[WARNING]: Socket no corresponde a un Worker ni a un Cliente.");
-    }
+        pthread_mutex_unlock(&manager->mutex);
+    } 
 
-    // Mostrar listas actualizadas
-    logInfo("[INFO]: Lista actualizada de Workers:");
-    listarWorkers(manager);
-
-    logInfo("[INFO]: Lista actualizada de Clientes:");
-    listClients(clientManager);
+    if (disconnectedWorker) {
+            close(client_fd);  // Cerrar el socket antes de eliminar el Worker
+            int wasMain = (manager->mainTextWorker == disconnectedWorker || manager->mainMediaWorker == disconnectedWorker);
+            if (logoutWorkerBySocket(client_fd, manager) == 0) {
+                customPrintf("\n[INFO]: Worker desconectado correctamente.\n");
+                if (wasMain) {
+                    customPrintf("\n[INFO]: Reasignando nuevo Worker principal...\n");
+                    reasignarWorkersPrincipales(manager);
+                }
+            }
+        } else if (isClient) {
+            customPrintf("\n[INFO]: Identificado como Cliente. Procesando desconexión...\n");
+            close(client_fd);
+            removeClientBySocket(clientManager, client_fd);
+        } else {
+            logWarning("[WARNING]: Socket no corresponde a un Worker ni a un Cliente.");
+        }
 }
-
 
 void alliberarMemoria(GothamConfig *gothamConfig) {
     if (gothamConfig->ipFleck) free(gothamConfig->ipFleck);
@@ -893,7 +857,7 @@ void alliberarMemoria(GothamConfig *gothamConfig) {
 
 void handleSigint(int sig) {
     (void)sig; // Ignorar el valor de la señal
-    logInfo("S'ha rebut SIGINT. Tancant el sistema...\n");
+    customPrintf("\nS'ha rebut SIGINT. Tancant el sistema...\n");
     stop_server = 1;
 
     // Liberar los recursos de WorkerManager
@@ -923,26 +887,24 @@ void handleSigint(int sig) {
     if (global_server_fds) {
         if (global_server_fds->server_fd_fleck >= 0) {
             close(global_server_fds->server_fd_fleck);
+            global_server_fds->server_fd_fleck = -1;
         }
-        if (global_server_fds->server_fd_enigma >= 0) {
-            close(global_server_fds->server_fd_enigma);
+        if (global_server_fds->server_fd_worker >= 0) {
+            close(global_server_fds->server_fd_worker);
+            global_server_fds->server_fd_worker = -1;
         }
     }
 
     // Liberar la configuración global
     if (global_config) {
-        if (global_config->ipFleck) {
-            free(global_config->ipFleck);
-        }
-        if (global_config->ipHarEni) {
-            free(global_config->ipHarEni);
-        }
+        if (global_config->ipFleck) free(global_config->ipFleck);
+        if (global_config->ipHarEni) free(global_config->ipHarEni);
         free(global_config);
         global_config = NULL;
     }
 
     logSuccess("Sistema tancat correctament.\n");
-    exit(0);
+    exit(EXIT_SUCCESS);
 }
 
 // Funció principal del servidor Gotham
@@ -959,40 +921,27 @@ int main(int argc, char *argv[]) {
     ClientManager *clientManager = NULL; // Declarar clientManager aquí
 
     if (!config) {
-        logError("Error asignando memoria para la configuración.\n");
+        customPrintf("Error asignando memoria para la configuración.\n");
         return EXIT_FAILURE;
     }
 
     readConfigFileGeneric(argv[1], config, CONFIG_GOTHAM);
-    logInfo("Configuración cargada correctamente.\n");
+    customPrintf("\nConfiguración cargada correctamente.\n");
 
     ServerFds server_fds;
     global_server_fds = &server_fds; // Asignar el puntero global
 
     signal(SIGINT, handleSigint);
+    signal(SIGPIPE, SIG_IGN);
 
     server_fds.server_fd_fleck = startServer(config->ipFleck, config->portFleck);
-    if (server_fds.server_fd_fleck >= 0) {
-        char log_message[256];
-        snprintf(log_message, sizeof(log_message), "[INFO]: Servidor Fleck iniciado en IP: %s, Puerto: %d", config->ipFleck, config->portFleck);
-        logInfo(log_message);
-    } else {
-        logError("[ERROR]: Error al iniciar el servidor para Fleck.");
-    }
+    server_fds.server_fd_worker = startServer(config->ipHarEni, config->portHarEni);
 
-    server_fds.server_fd_enigma = startServer(config->ipHarEni, config->portHarEni);
-    if (server_fds.server_fd_enigma >= 0) {
-        char log_message[256];
-        snprintf(log_message, sizeof(log_message), "[INFO]: Servidor Enigma iniciado en IP: %s, Puerto: %d", config->ipHarEni, config->portHarEni);
-        logInfo(log_message);
-    } else {
-        logError("[ERROR]: Error al iniciar el servidor para Enigma.");
-    }
-
-    if (server_fds.server_fd_fleck < 0 || server_fds.server_fd_enigma < 0) {
-        logError("Error al iniciar los servidores.\n");
+    if (server_fds.server_fd_fleck < 0 || server_fds.server_fd_worker < 0) {
+        customPrintf("Error al iniciar los servidores.\n");
+        //FER TOTS ELS FREES
         if (server_fds.server_fd_fleck >= 0) close(server_fds.server_fd_fleck);
-        if (server_fds.server_fd_enigma >= 0) close(server_fds.server_fd_enigma);
+        if (server_fds.server_fd_worker >= 0) close(server_fds.server_fd_worker);
 
         if (clientManager) {
             freeClientManager(clientManager);
@@ -1016,18 +965,36 @@ int main(int argc, char *argv[]) {
     // Crear el WorkerManager compartido
     manager = createWorkerManager();
     clientManager = createClientManager();
+    if (!manager || !clientManager) {
+        customPrintf("[ERROR]: No se pudo inicializar WorkerManager o ClientManager.");
+        exit(EXIT_FAILURE);
+    }
+
+    // Crear el hilo de HEARTBEAT
+    ConnectionArgs *heartbeatArgs = malloc(sizeof(ConnectionArgs));
+    heartbeatArgs->workerManager = manager;
+    heartbeatArgs->clientManager = clientManager;
+    heartbeatArgs->client_fd = -1; // No lo usaremos en este caso
+
+    pthread_t heartbeatThread;
+    if (pthread_create(&heartbeatThread, NULL, enviarHeartbeat, heartbeatArgs) != 0) {
+        customPrintf("[ERROR]: No se pudo crear el hilo de HEARTBEAT.");
+        free(heartbeatArgs); // Liberar en caso de error
+        exit(EXIT_FAILURE);
+    }
+    pthread_detach(heartbeatThread);
+    customPrintf("\n[INFO]: Hilo de HEARTBEAT iniciado.\n");
 
     // Bucle principal de aceptación de conexiones
     while (!stop_server) {
         fd_set read_fds;
         FD_ZERO(&read_fds);
         FD_SET(server_fds.server_fd_fleck, &read_fds);
-        FD_SET(server_fds.server_fd_enigma, &read_fds);
+        FD_SET(server_fds.server_fd_worker, &read_fds);
 
-        int max_fd = (server_fds.server_fd_fleck > server_fds.server_fd_enigma) ?
-                        server_fds.server_fd_fleck : server_fds.server_fd_enigma;
+        int max_fd = (server_fds.server_fd_fleck > server_fds.server_fd_worker) ?
+                        server_fds.server_fd_fleck : server_fds.server_fd_worker;
 
-        logInfo("Esperando conexiones...");
         int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
         if (activity < 0) {
             if (stop_server) break;
@@ -1042,7 +1009,7 @@ int main(int argc, char *argv[]) {
                 pthread_t thread;
                 ConnectionArgs *args = malloc(sizeof(ConnectionArgs));
                 if (!args) {
-                    logError("[ERROR]: Error asignando memoria para los argumentos del hilo.");
+                    customPrintf("[ERROR]: Error asignando memoria para los argumentos del hilo.");
                     close(client_fd);
                     continue;
                 }
@@ -1061,14 +1028,14 @@ int main(int argc, char *argv[]) {
         }
 
         // Manejo de conexiones de Harley/Enigma (workers)
-        if (FD_ISSET(server_fds.server_fd_enigma, &read_fds)) {
-            int client_fd = accept_connection(server_fds.server_fd_enigma);
+        if (FD_ISSET(server_fds.server_fd_worker, &read_fds)) {
+            int client_fd = accept_connection(server_fds.server_fd_worker);
             if (client_fd >= 0) {
-                logInfo("[INFO]: Conexión aceptada desde Harley/Enigma.");
+                customPrintf("\n[INFO]: Conexión aceptada desde Harley/Enigma.\n");
                 pthread_t thread;
                 ConnectionArgs *args = malloc(sizeof(ConnectionArgs));
                 if (!args) {
-                    logError("[ERROR]: Error asignando memoria para los argumentos del hilo.");
+                    customPrintf("[ERROR]: Error asignando memoria para los argumentos del hilo.");
                     close(client_fd);
                     continue;
                 }
@@ -1087,14 +1054,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    pthread_t heartbeatThread;
-    if (pthread_create(&heartbeatThread, NULL, enviarHeartbeat, manager) != 0) {
-        logError("[ERROR]: No se pudo crear el hilo de HEARTBEAT.");
-        exit(EXIT_FAILURE);
-    }
-    pthread_detach(heartbeatThread); // Liberar automáticamente el recurso del hilo
-    logInfo("[INFO]: Hilo de HEARTBEAT iniciado.");
-
     // Antes de salir, libera todo explícitamente
     if (manager) {
         freeWorkerManager(manager);
@@ -1110,8 +1069,8 @@ int main(int argc, char *argv[]) {
     }
 
     close(server_fds.server_fd_fleck);
-    close(server_fds.server_fd_enigma);
+    close(server_fds.server_fd_worker);
 
-    logInfo("Servidor Gotham cerrado correctamente.\n");
+    customPrintf("\nServidor Gotham cerrado correctamente.\n");
     return EXIT_SUCCESS;
 }

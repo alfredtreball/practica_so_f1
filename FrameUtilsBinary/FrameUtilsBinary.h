@@ -23,6 +23,7 @@ int deserialize_frame_binary(const char *buffer, BinaryFrame *frame);
 // Funciones de envío y recepción binaria
 int send_frame_binary(int socket_fd, const BinaryFrame *frame);
 int receive_frame_binary(int socket_fd, BinaryFrame *frame);
+int receive_any_frame(int socket_fd, void *frame, int *is_binary);
 
 // Calcula el checksum para un frame binario
 uint16_t calculate_checksum_binary(const char *data, size_t length, int include_null);

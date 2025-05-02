@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../DataConversion/DataConversion.h"
+#include "../FrameUtils/FrameUtils.h"
+
 // Serializa un frame binario
 void serialize_frame_binary(const BinaryFrame *frame, char *buffer) {
     if (!frame || !buffer) return;
@@ -26,7 +29,7 @@ void serialize_frame_binary(const BinaryFrame *frame, char *buffer) {
 // Deserializa un frame binario
 int deserialize_frame_binary(const char *buffer, BinaryFrame *frame) {
     if (!buffer || !frame) return -1;
-
+    
     memset(frame, 0, sizeof(BinaryFrame));
     memcpy(&frame->type, buffer, sizeof(frame->type));
     memcpy(&frame->data_length, buffer + 1, sizeof(frame->data_length));
@@ -50,12 +53,14 @@ int send_frame_binary(int socket_fd, const BinaryFrame *frame) {
     char buffer[FRAME_BINARY_SIZE];
     serialize_frame_binary(frame, buffer);
 
-    if (write(socket_fd, buffer, FRAME_BINARY_SIZE) < 0) {
-        perror("Error enviando el frame");
+    ssize_t bytesEnviados = write(socket_fd, buffer, FRAME_BINARY_SIZE);
+    
+    if (bytesEnviados < 0) {
+        perror("Error enviando el frame binario");
         return -1;
     }
-
-    return 0;
+    
+    return bytesEnviados;  // ✅ Devuelve el número de bytes enviados correctamente
 }
 
 // Recibe un frame binario
@@ -76,6 +81,7 @@ int receive_frame_binary(int socket_fd, BinaryFrame *frame) {
 
     return deserialize_frame_binary(buffer, frame);
 }
+
 
 // Calcula el checksum binario
 uint16_t calculate_checksum_binary(const char *data, size_t length, int include_null) {

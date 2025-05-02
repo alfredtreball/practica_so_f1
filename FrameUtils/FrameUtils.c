@@ -3,7 +3,12 @@
 #include <unistd.h>
 #include <time.h>
 #include <stdlib.h>
+#include <poll.h>
 #include <stdio.h>
+
+#include "../DataConversion/DataConversion.h"
+#include "../Logging/Logging.h"
+#include "../FrameUtilsBinary/FrameUtilsBinary.h"
 
 // Serializa un frame en un buffer
 void serialize_frame(const Frame *frame, char *buffer) {
@@ -75,9 +80,16 @@ int send_frame(int socket_fd, const Frame *frame) {
     char buffer[FRAME_SIZE];
     serialize_frame(frame, buffer);
 
-    if (write(socket_fd, buffer, FRAME_SIZE) < 0) {
-        perror("Error enviando el frame");
-        return -1;
+    size_t totalSent = 0;
+    while (totalSent < FRAME_SIZE) {
+        ssize_t bytesSent = write(socket_fd, buffer + totalSent, FRAME_SIZE - totalSent);
+
+        if (bytesSent < 0) {
+            perror("[ERROR][SendFrame] ❌ Error enviando el frame");
+            return -1;
+        }
+
+        totalSent += bytesSent;
     }
 
     return 0;
@@ -91,33 +103,72 @@ int receive_frame(int socket_fd, Frame *frame) {
     }
 
     char buffer[FRAME_SIZE];
-    ssize_t bytesRead = read(socket_fd, buffer, FRAME_SIZE);
+    ssize_t totalBytesRead = 0;
 
-    if (bytesRead < 0) {
-        // Caso de error al leer
-        perror("[ERROR][ReceiveFrame] Error recibiendo el frame");
-        return -1;
-    } else if (bytesRead == 0) {
-        // Caso de conexión cerrada ordenadamente
-        fprintf(stderr, "[INFO][ReceiveFrame] Conexión cerrada por el peer (socket %d).\n", socket_fd);
-        return -1;
+    memset(buffer, 0, FRAME_SIZE);
+
+    while (totalBytesRead < FRAME_SIZE) {
+        ssize_t bytesRead = read(socket_fd, buffer + totalBytesRead, FRAME_SIZE - totalBytesRead);
+
+        if (bytesRead < 0) {
+            perror("[ERROR][ReceiveFrame] ❌ Error recibiendo el frame");
+            return -1;
+        } else if (bytesRead == 0) {
+            customPrintf("\nSocket cerrado por el otro extremo\n");
+            return -1;
+        }
+
+        totalBytesRead += bytesRead;
     }
 
-    if (bytesRead != FRAME_SIZE) {
-        // Un frame debería ser exactamente de tamaño `FRAME_SIZE`
-        fprintf(stderr, "[ERROR][ReceiveFrame] Frame incompleto recibido. Bytes leídos: %zd\n", bytesRead);
-        return -1;
+    if (buffer[0] == 0x00) {
+        memmove(buffer, buffer + 1, FRAME_SIZE - 1);
+        buffer[FRAME_SIZE - 1] = '\0'; // Asegurar terminación correcta
     }
 
-    // Intentar deserializar el frame
+    // Intentar deserializar el frame ajustado
     if (deserialize_frame(buffer, frame) != 0) {
-        fprintf(stderr, "[ERROR][ReceiveFrame] Error deserializando el frame recibido\n");
+        fprintf(stderr, "[ERROR][ReceiveFrame] ❌ Error deserializando el frame recibido\n");
         return -1;
     }
 
-    return 0; // Éxito
+    return 0;
 }
 
+int wait_for_data(int socket_fd, int timeout_ms) {
+    struct pollfd fds;
+    fds.fd = socket_fd;
+    fds.events = POLLIN;
+
+    return poll(&fds, 1, timeout_ms);
+}
+
+int receive_any_frame(int socket_fd, void *frame, int *is_binary) {
+    if (!frame || !is_binary) return -1;
+
+    char buffer[FRAME_BINARY_SIZE];  // Usamos el tamaño de la trama más grande
+
+    //Llegim la trama del buffer
+    ssize_t bytesRead = read(socket_fd, buffer, FRAME_BINARY_SIZE);
+    //customPrintf("He leído de socketFD: %d, bytes leídos: %ld\n", socket_fd, bytesRead);
+
+    if (bytesRead <= 0) {
+        return -1;
+    }
+
+    // 🔍 **Detectar el tipo de trama**
+    uint8_t type = buffer[0];  // El primer byte es el tipo de trama
+    *is_binary = (type == 0x05);  // Si es 0x05, es binaria; si no, es normal
+
+    // 🔄 **Deserializar según el tipo**
+    if (*is_binary) {
+        customPrintf("IS BINARY\n");
+        return deserialize_frame_binary(buffer, (BinaryFrame *)frame);
+    } else {
+        customPrintf("IS NORMAL\n");
+        return deserialize_frame(buffer, (Frame *)frame);
+    }
+}
 
 // Calcula el checksum de un conjunto de datos
 uint16_t calculate_checksum(const char *data, size_t length, int include_null) {

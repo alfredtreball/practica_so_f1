@@ -4,6 +4,8 @@
 #include <time.h>
 #include <string.h>
 
+#include "../DataConversion/DataConversion.h"
+
 int leerTrama(int socket_fd, Frame *frame) {
     if (receive_frame(socket_fd, frame) != 0) {
         enviarTramaError(socket_fd);
@@ -55,9 +57,13 @@ int leerTramaBinaria(int socket_fd, BinaryFrame *frame) {
 }
 
 int escribirTramaBinaria(int socket_fd, const BinaryFrame *frame) {
-    if (send_frame_binary(socket_fd, frame) != 0) {
+    ssize_t bytesEnviados = send_frame_binary(socket_fd, frame);
+    
+    if (bytesEnviados < 0) {
         logError("[GestorTramas] Error al escribir la trama binaria.");
         return -1;
     }
-    return 0;
+
+
+    return bytesEnviados;  // ✅ Devuelve el número de bytes enviados correctamente
 }

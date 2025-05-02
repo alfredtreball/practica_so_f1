@@ -1,4 +1,5 @@
 #include "compression_handler.h"
+#include "../DataConversion/DataConversion.h"
 
 int process_compression(const char *filepath, int factor) {
     // Obtener la extensión del archivo
@@ -19,7 +20,7 @@ int process_compression(const char *filepath, int factor) {
         if (result != 0) {
             fprintf(stderr, "[ERROR]: Error al comprimir la imagen '%s'. Código de error: %d\n", filepath, result);
         } else {
-            printf("[INFO]: Imagen comprimida correctamente: '%s'.\n", filepath);
+            customPrintf("[INFO]: Imagen comprimida correctamente: '%s'.\n", filepath);
         }
     } else if (strcmp(extension, "wav") == 0) {
         // Comprimir audio
@@ -27,7 +28,7 @@ int process_compression(const char *filepath, int factor) {
         if (result != 0) {
             fprintf(stderr, "[ERROR]: Error al comprimir el audio '%s'. Código de error: %d\n", filepath, result);
         } else {
-            printf("[INFO]: Audio comprimido correctamente: '%s'.\n", filepath);
+            customPrintf("[INFO]: Audio comprimido correctamente: '%s'.\n", filepath);
         }
     } else {
         fprintf(stderr, "[ERROR]: Extensión no soportada para compresión: '%s'.\n", extension);

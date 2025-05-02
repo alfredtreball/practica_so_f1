@@ -36,11 +36,6 @@ int connect_to_server(const char *ip, int port) {
         return -1;
     }
 
-    char *msg = NULL;
-    asprintf(&msg, "Conectado al servidor: %s:%d\n", ip, port);
-    printF(msg);
-    free(msg);
-
     return sockfd;
 }
 
