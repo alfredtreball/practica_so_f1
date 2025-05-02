@@ -382,6 +382,161 @@ void *listenToHarley() {
     return NULL;
 }
 
+void *listenToEnigma() {
+    static int fileDescriptor = -1;
+    int fileComplete = 0;
+    int receivedChunks = 1;
+    int bytesReceived;
+
+    while (1) {
+        union {
+            Frame normal;
+            BinaryFrame binario;
+        } frame;
+
+        int is_binary = -1;
+        //customPrintf("Voy a leer de workerSocket: %d", globalState->workerSocket);
+        if (receive_any_frame(globalState->workerSocket, &frame, &is_binary) != 0) {
+            customPrintf("Error recibiendo trama. Posible caída de Harley.\n");
+        
+            // Detectar socket cerrado
+            char tmp;
+            int ret = recv(globalState->workerSocket, &tmp, 1, MSG_PEEK);
+            if (ret == 0) {
+                customPrintf("Socket cerrado. Reasignando Harley...\n");
+        
+                if (!solicitarReasignacionAWorker(globalState)) {
+                    customPrintf("[ERROR]: No se pudo reasignar el Worker.\n");
+                    free(globalState);
+                    return NULL;
+                }
+        
+                // Esperar hasta que el nuevo socket esté listo
+                while (workerSocket != globalState->workerSocket) {
+                    usleep(1000);
+                    workerSocket = globalState->workerSocket;
+                }
+        
+                customPrintf("[INFO]: Reasignación completada. Continuando recepción...\n");
+                continue; // volver al bucle y seguir recibiendo
+            } else {
+                break; // error fatal o socket válido pero con error
+            }
+        }
+
+        customPrintf("[DEBUG] 📨 Trama recibida de Enigma de tipo: 0x%02X", frame.normal.type);
+
+        //Decidir qué hacer según el type
+        if (frame.normal.type == 0x05) {  // Trama binaria
+            BinaryFrame *binary = &frame.binario;
+
+            if (binary->data_length > DATA_SIZE) {
+                customPrintf("[ERROR]: Longitud de datos inválida en trama 0x05.");
+                continue;
+            }
+
+            if (fileDescriptor == -1) {
+                fileDescriptor = open(globalState->filePath, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+                if (fileDescriptor < 0) {
+                    customPrintf("[ERROR]: No se pudo abrir el archivo para escribir.");
+                    continue;
+                }
+            }
+
+            if (write(fileDescriptor, binary->data, binary->data_length) != binary->data_length) {
+                customPrintf("[ERROR]: Fallo al escribir datos en el archivo.");
+                close(fileDescriptor);
+                fileDescriptor = -1;
+                continue;
+            }
+
+            receivedChunks++;
+            statusResult = 50.0 + ((float)bytesReceived * DATA_SIZE / (float)globalState->fileSize) * 50.0;
+
+            bytesReceived += binary->data_length;
+
+            if (binary->data_length < DATA_SIZE) { 
+                close(fileDescriptor);
+                fileDescriptor = -1;
+                logInfo("[SUCCESS]: Archivo recibido completamente.");
+                customPrintf("\n%d\n", bytesReceived);
+                fileComplete = 1;
+                pthread_mutex_lock(&distortionMutex);
+                distortionInProgress = 0;
+                pthread_cond_signal(&distortionFinished);
+                pthread_mutex_unlock(&distortionMutex);
+            }
+
+            if (fileComplete) {
+                char calculatedMD5[33] = {0};
+                calculate_md5(globalState->filePath, calculatedMD5);
+                
+                if (strcmp(calculatedMD5, receivedMD5Sum) == 0) {
+                    logInfo("[SUCCESS]: MD5 correcto. Enviando CHECK_OK a Enigma.\n");
+                    sendMD5Response(globalState->workerSocket, "CHECK_OK");
+                } else {
+                    customPrintf("[ERROR]: MD5 incorrecto. Enviando CHECK_KO a Enigma.\n");
+                    customPrintf("md5: %s\n md5 expected: %s\nfileComplete: %s\n", calculatedMD5, receivedMD5Sum, fileComplete);
+                    sendMD5Response(globalState->workerSocket, "CHECK_KO");
+                }
+                break;
+            }
+
+        } else {  // Trama normal
+            if (frame.normal.type == 0x04) {
+                char fileSizeStr[20];
+                char md5Sum[33];
+                if (sscanf(frame.normal.data, "%19[^&]&%32s", fileSizeStr, md5Sum) != 2) {
+                    customPrintf("[ERROR]: Trama 0x04 de Enigma con formato inválido.");
+                    continue;
+                }
+                strncpy(receivedMD5Sum, md5Sum, sizeof(receivedMD5Sum) - 1);
+                customPrintf("md5: %s\n", md5Sum);
+                customPrintf("md5 expected: %s\n", receivedMD5Sum);
+            }
+
+            if (frame.normal.type == 0x06) { // Confirmación de MD5
+                if (strcmp(frame.normal.data, "CHECK_OK") == 0) {
+                    customPrintf("\n[INFO]: Enigma ha confirmado correctamente el MD5 del archivo recibido (CHECK_OK).\n");
+                    //Comprovar si harley segueix actiu
+                    char buf[1];
+                    int ret = recv(globalState->workerSocket, buf, 1, MSG_PEEK);
+                    if (ret == 0) {
+                        customPrintf("[INFO]: Socket de Enigma cerrado tras CHECK_OK. Reasignando...\n");
+
+                        if (!solicitarReasignacionAWorker(globalState)) {
+                            customPrintf("[ERROR]: No se pudo reasignar el Worker.");
+                            free(globalState);
+                            return NULL;
+                        }
+
+                        while (workerSocket != globalState->workerSocket) {
+                            usleep(1000);
+                            workerSocket = globalState->workerSocket;
+                        }
+
+                        customPrintf("[INFO]: Nuevo Enigma asignado. Esperando archivo distorsionado...\n");
+                    }
+                } else if (strcmp(frame.normal.data, "CHECK_KO") == 0) {
+                    customPrintf("[ERROR]: Enigma ha reportado un error en la comprobación MD5 del archivo recibido de Fleck (CHECK_KO).");
+                }
+            }
+        }
+    }
+
+    if (fileDescriptor != -1) {
+        close(fileDescriptor);
+        fileDescriptor = -1;
+    }
+
+    if (globalState->workerSocket == -1) {
+        free(globalState);
+    }
+
+    return NULL;
+}
+
+
 void *listenToGotham(void *arg) {
     int gothamSocket = *(int *)arg;
     free(arg);
@@ -786,7 +941,6 @@ void *sendFileChunks(void *args) {
         if (sentBytes < 0) {
             customPrintf("[ERROR]: Fallo al enviar trama 0x05. Verificando reconexión...");
             // Se conectó a un nuevo Worker, continuar desde el offset
-            //lseek(fd, totalSent, SEEK_SET);
             usleep(10000);  // Esperar 100ms antes de reintentar
             totalSent -= 247; // Restar el tamaño del chunk enviado
             lseek(fd, totalSent, SEEK_SET); // Volver al offset anterior
@@ -831,14 +985,25 @@ void *sendFileChunks(void *args) {
         customPrintf("\n[DEBUG] 🟢 write()=0 => fin del fichero. Se enviaron %zd bytes en total.", totalSent);
 
         // Aquí lanzas de nuevo el hilo 
-        pthread_t harleyListenerThread;
-        int *socketArg = malloc(sizeof(int));
-        *socketArg = workerSocket;
-        if (pthread_create(&harleyListenerThread, NULL, listenToHarley, socketArg) != 0) {
-            customPrintf("Error creando hilo de recepción");
-            return NULL;
+        if (strcmp(globalState->mediaType, "MEDIA") == 0) {
+            pthread_t harleyListenerThread;
+            int *socketArg = malloc(sizeof(int));
+            *socketArg = workerSocket;
+            if (pthread_create(&harleyListenerThread, NULL, listenToHarley, socketArg) != 0) {
+                customPrintf("[ERROR]: No se pudo crear el hilo para escuchar a Harley.");
+                return NULL;
+            }
+            pthread_detach(harleyListenerThread);
+        } else if (strcmp(globalState->mediaType, "TEXT") == 0) {
+            pthread_t enigmaListenerThread;
+            int *socketArgEn = malloc(sizeof(int));
+            *socketArgEn = workerSocket;
+            if (pthread_create(&enigmaListenerThread, NULL, listenToEnigma, socketArgEn) != 0) {
+                customPrintf("[ERROR]: No se pudo crear el hilo para escuchar a Enigma.");
+                return NULL;
+            }
+            pthread_detach(enigmaListenerThread);
         }
-        pthread_detach(harleyListenerThread);
     }
 
     close(fd);

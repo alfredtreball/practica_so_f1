@@ -19,7 +19,7 @@ COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataCo
          GestorTramas/GestorTramas.c Networking/Networking.c FrameUtils/FrameUtils.c \
          Logging/Logging.c MD5SUM/md5Sum.c FrameUtilsBinary/FrameUtilsBinary.c \
          MessageQueue/MessageQueue.c CleanFiles/CleanFiles.c Shared_Memory/Shared_memory.c \
-		 HarleySync/HarleySync.c Semafors/semaphore_v2.c
+		 Semafors/semaphore_v2.c
 
 # Objectius per compilar cada executable
 all: Fleck_Montserrat.exe Fleck_Montserrat1.exe Harley_Matagalls.exe \
@@ -34,12 +34,12 @@ Fleck_Montserrat.exe: Fleck.c $(COMMON)
 	$(CC) $(CFLAGS) Fleck.c $(COMMON) -o Fleck_Montserrat.exe
 
 # Compilació de Harley a Matagalls
-Harley_Matagalls.exe: Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c 
+Harley_Matagalls.exe: Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c HarleySync/HarleySync.c
 	$(CC) $(CFLAGS) Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c -o Harley_Matagalls.exe -lm -lpthread
 
 # Compilació de Enigma a Puigpedros
-Enigma_Puigpedros.exe: Enigma.c $(COMMON)
-	$(CC) $(CFLAGS) Enigma.c $(COMMON) -o Enigma_Puigpedros.exe
+Enigma_Puigpedros.exe: Enigma.c $(COMMON) EnigmaCompress/EnigmaCompress.c EnigmaSync/EnigmaSync.c
+	$(CC) $(CFLAGS) Enigma.c $(COMMON) EnigmaCompress/EnigmaCompress.c EnigmaSync/EnigmaSync.c -o Enigma_Puigpedros.exe
 
 # Regles per executar automàticament cada programa amb el fitxer de configuració corresponent
 gm: Gotham_Montserrat.exe
@@ -68,6 +68,9 @@ vhma: Harley_Matagalls.exe
 
 ep: Enigma_Puigpedros.exe
 	./Enigma_Puigpedros.exe fitxers_configuració/config_enigma.dat
+
+ep1: Enigma_Puigpedros.exe
+	./Enigma_Puigpedros.exe fitxers_configuració/config_enigma1.dat
 
 # Neteja els fitxers generats
 clean:
