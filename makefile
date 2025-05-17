@@ -26,7 +26,7 @@ all: Fleck_Montserrat.exe Fleck_Montserrat1.exe Harley_Matagalls.exe \
      Enigma_Puigpedros.exe Gotham_Montserrat.exe Harley_Matagalls1.exe
 
 # Compilació de Gotham a Montserrat
-Gotham_Montserrat.exe: Gotham.c $(COMMON)
+Gotham_Montserrat.exe: Gotham.c arkham $(COMMON)
 	$(CC) $(CFLAGS) Gotham.c $(COMMON) -o Gotham_Montserrat.exe
 
 # Compilació de Fleck a Montserrat
@@ -40,6 +40,9 @@ Harley_Matagalls.exe: Harley.c $(COMMON) Compression/so_compression.o HarleyComp
 # Compilació de Enigma a Puigpedros
 Enigma_Puigpedros.exe: Enigma.c $(COMMON) EnigmaCompress/EnigmaCompress.c EnigmaSync/EnigmaSync.c
 	$(CC) $(CFLAGS) Enigma.c $(COMMON) EnigmaCompress/EnigmaCompress.c EnigmaSync/EnigmaSync.c -o Enigma_Puigpedros.exe -lm -lpthread
+
+arkham: Arkham.c $(COMMON)
+	$(CC) $(CFLAGS) Arkham.c $(COMMON) -o arkham
 
 # Regles per executar automàticament cada programa amb el fitxer de configuració corresponent
 gm: Gotham_Montserrat.exe
@@ -64,13 +67,22 @@ hma1: Harley_Matagalls.exe
 	./Harley_Matagalls.exe fitxers_configuració/config_harley1.dat
 
 vhma: Harley_Matagalls.exe
+	valgrind --dsymutil=yes --track-origins=yes --leak-check=full --track-fds=yes --show-reachable=yes -s ./Harley_Matagalls.exe fitxers_configuració/config_harley.dat
+
+vhma1: Harley_Matagalls.exe
 	valgrind --dsymutil=yes --track-origins=yes --leak-check=full --track-fds=yes --show-reachable=yes -s ./Harley_Matagalls.exe fitxers_configuració/config_harley1.dat
 
 ep: Enigma_Puigpedros.exe
 	./Enigma_Puigpedros.exe fitxers_configuració/config_enigma.dat
-
+	
 ep1: Enigma_Puigpedros.exe
 	./Enigma_Puigpedros.exe fitxers_configuració/config_enigma1.dat
+
+vep: Enigma_Puigpedros.exe
+	valgrind --dsymutil=yes --track-origins=yes --leak-check=full --track-fds=yes --show-reachable=yes -s ./Enigma_Puigpedros.exe fitxers_configuració/config_enigma.dat
+
+vep1: Enigma_Puigpedros.exe
+	valgrind --dsymutil=yes --track-origins=yes --leak-check=full --track-fds=yes --show-reachable=yes -s ./Enigma_Puigpedros.exe fitxers_configuració/config_enigma1.dat
 
 # Neteja els fitxers generats
 clean:

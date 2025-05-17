@@ -14,7 +14,7 @@ int leerTrama(int socket_fd, Frame *frame) {
 
     uint16_t calculated_checksum = calculate_checksum(frame->data, frame->data_length, 0);
     if (calculated_checksum != frame->checksum) {
-        logError("[GestorTramas] Checksum inválido en trama normal.");
+        customPrintf("[GestorTramas] Checksum inválido en trama normal.");
         enviarTramaError(socket_fd);
         return -1;
     }
@@ -23,7 +23,7 @@ int leerTrama(int socket_fd, Frame *frame) {
 
 int escribirTrama(int socket_fd, const Frame *frame) {
     if (send_frame(socket_fd, frame) != 0) {
-        logError("[GestorTramas] Error al escribir la trama normal.");
+        customPrintf("[GestorTramas] Error al escribir la trama normal.");
         return -1;
     }
 
@@ -42,14 +42,14 @@ int enviarTramaError(int socket_fd) {
 
 int leerTramaBinaria(int socket_fd, BinaryFrame *frame) {
     if (receive_frame_binary(socket_fd, frame) != 0) {
-        logError("[GestorTramas] Error al leer la trama binaria.");
+        customPrintf("[GestorTramas] Error al leer la trama binaria.");
         enviarTramaError(socket_fd);
         return -1;
     }
 
     uint16_t calculated_checksum = calculate_checksum_binary(frame->data, frame->data_length, 1);
     if (calculated_checksum != frame->checksum) {
-        logError("[GestorTramas] Checksum inválido en trama binaria.");
+        customPrintf("[GestorTramas] Checksum inválido en trama binaria.");
         enviarTramaError(socket_fd);
         return -1;
     }
@@ -60,7 +60,7 @@ int escribirTramaBinaria(int socket_fd, const BinaryFrame *frame) {
     ssize_t bytesEnviados = send_frame_binary(socket_fd, frame);
     
     if (bytesEnviados < 0) {
-        logError("[GestorTramas] Error al escribir la trama binaria.");
+        customPrintf("[GestorTramas] Error al escribir la trama binaria.");
         return -1;
     }
 

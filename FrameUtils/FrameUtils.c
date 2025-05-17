@@ -111,10 +111,9 @@ int receive_frame(int socket_fd, Frame *frame) {
         ssize_t bytesRead = read(socket_fd, buffer + totalBytesRead, FRAME_SIZE - totalBytesRead);
 
         if (bytesRead < 0) {
-            perror("[ERROR][ReceiveFrame] ❌ Error recibiendo el frame");
+            perror("[ERROR][ReceiveFrame]  Error recibiendo el frame");
             return -1;
         } else if (bytesRead == 0) {
-            customPrintf("\nSocket cerrado por el otro extremo\n");
             return -1;
         }
 

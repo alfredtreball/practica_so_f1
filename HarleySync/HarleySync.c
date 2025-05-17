@@ -112,11 +112,6 @@ int load_harley_distortion_state(SharedMemory *sm, HarleyDistortionEntry *entrie
             case STATUS_IN_PROGRESS:status_str = "IN_PROGRESS"; break;
             case STATUS_DONE:       status_str = "DONE"; break;
         }
-
-        customPrintf("[DEBUG] 📄 Archivo: %s | Byte actual: %ld | Estado: %s\n",
-                    entries[i].fileName,
-                    entries[i].currentByte,
-                    status_str);
     }
 
     unlock_shared_memory(sm);

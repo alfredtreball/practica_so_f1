@@ -181,7 +181,6 @@ void *handleGothamFrames(void *arg)
         processReceivedFrame(gothamSocket, &frame);
     }
 
-    customPrintf("[ERROR]: Gotham se ha desconectado.");
     close(gothamSocket);
     pthread_exit(NULL);
 }
@@ -241,7 +240,7 @@ void *handleFleckFrames(void *arg){
         ssize_t bytesRead = recv(clientSocket, &type, 1, MSG_PEEK);
 
         if (bytesRead <= 0) {
-            customPrintf("[ERROR]: Error al leer el socket de Fleck. Posible desconexión.\n");
+            customPrintf("\nFleck s'ha desconnectat\n");
             close(clientSocket);
             return NULL;
         }
@@ -278,8 +277,6 @@ void *handleFleckFrames(void *arg){
                     customPrintf(logMessage);
                     free(logMessage);
 
-                    customPrintf("\nReceiving original text…\n");
-
                     //Guardar variables
                     strncpy(receivedFileName, fileName, sizeof(receivedFileName) - 1);
                     strncpy(expectedMD5, md5Sum, sizeof(expectedMD5) - 1);
@@ -315,7 +312,7 @@ void *handleFleckFrames(void *arg){
                 else if (request.type == 0x06) {
                     // Procesar respuesta MD5 recibida desde Fleck
                     if (strcmp(request.data, "CHECK_OK") == 0) {
-                        customPrintf("[INFO]: Fleck ha confirmado correctamente el MD5 del archivo comprimido (CHECK_OK).");
+                        customPrintf("\nFleck confirma md5sum correcte.\n");
                         remove_completed_distortions(&harleySharedMemory); // Limpieza tras éxito
                     } else if (strcmp(request.data, "CHECK_KO") == 0) {
                         customPrintf("[ERROR]: Fleck ha reportado un error en la comprobación MD5 del archivo comprimido (CHECK_KO).");
@@ -390,9 +387,13 @@ void *sendCompressedFileToFleck(void *args) {
     ssize_t bytesRead;
 
     int bytesAcum = offset;
+    int alreadyPrinted = 0;
 
     while ((bytesRead = read(fd, buffer, sizeof(buffer))) > 0) {
-        customPrintf("Sending distorted text to %s\n", userName);
+        if (!alreadyPrinted) {
+            customPrintf("Sending distorted file to %s\n", userName);
+            alreadyPrinted = 1;
+        }
         frame.type = 0x05;
         frame.data_length = bytesRead;
         memcpy(frame.data, buffer, bytesRead);
@@ -416,7 +417,7 @@ void *sendCompressedFileToFleck(void *args) {
     if (bytesRead < 0) {
         customPrintf("[ERROR]: Fallo al leer el archivo comprimido.\n");
     } else {
-        customPrintf("[INFO]: Envío del archivo comprimido completado.\n");
+        customPrintf("\nS'ha completat l'enviament de l'arxiu comprimit a Fleck.\n");
     }
 
     close(fd);
@@ -473,7 +474,7 @@ void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSi
 
     static int distortionLogged = 0;
     if (!distortionLogged) {
-        customPrintf("Distorting...\n");
+        customPrintf("\nDistorting...\n");
         distortionLogged = 1;
     }
 
@@ -623,8 +624,6 @@ void enviaTramaArxiuDistorsionat(int clientSocket, const char *fileSizeCompresse
     if (escribirTrama(clientSocket, &frame) < 0) {
         customPrintf("[ERROR]: Fallo al enviar la trama del archivo distorsionado.");
     }
-    
-    customPrintf("[SUCCESS]: Trama del archivo distorsionado 0x04 enviada correctamente.\n");
 
     // Preparar para enviar el archivo comprimido en tramas binarias
     SendCompressedFileArgs *args = malloc(sizeof(SendCompressedFileArgs));
@@ -673,7 +672,6 @@ void *resume_distortion(void *arg) {
     }
 
     if (args->status == STATUS_PENDING) {
-        customPrintf("[RECOVERY] Archivo estaba PENDING, continúo recepción de Fleck...\n");
         save_harley_distortion_state(&harleySharedMemory, args->fileName, args->offset,
                                      args->factor, args->md5Sum, args->clientSocket, STATUS_PENDING);
         free(filePath);
@@ -683,9 +681,7 @@ void *resume_distortion(void *arg) {
 
     //Cas 2: Estava en STATUS_IN_PROGRESS (mentre comprimeix, iniciar compressió de nou)
     if (args->status == STATUS_IN_PROGRESS) {
-        customPrintf("[RECOVERY] 🔄 Estaba en IN_PROGRESS. Reiniciando compresión...\n");
-
-        // 📌 Si el archivo comprimido ya existe, eliminarlo para empezar desde cero
+        // Si el archivo comprimido ya existe, eliminarlo para empezar desde cero
         if (access(filePath, F_OK) != 0) {
             customPrintf("[ERROR]: No se encontró el archivo original para comprimir: %s", filePath);
             free(filePath);
@@ -709,7 +705,7 @@ void *resume_distortion(void *arg) {
             return NULL;
         }
         
-        customPrintf("[SUCCESS] ✅ Compresión completada correctamente.\n");
+        customPrintf("Compresión completada correctamente.\n");
         
         // Guardar el estado como STATUS_DONE para reanudar el envío del archivo
         save_harley_distortion_state(&harleySharedMemory, args->fileName, 0, args->factor,
@@ -720,8 +716,6 @@ void *resume_distortion(void *arg) {
 
     //Cas 3: Estava en STATUS_DONE (harley cau mentre envia a fleck l'arxiu)
     if (args->status == STATUS_DONE) {
-        customPrintf("[RECOVERY] 📤 Estaba en DONE.\n");
-    
         if (access(filePath, F_OK) != 0) {
             customPrintf("[ERROR]: No se encontró el archivo comprimido.");
             free(filePath);
@@ -852,8 +846,6 @@ int main(int argc, char *argv[]){
     if (init_shared_memory(&harleySharedMemory, 1234, sizeof(HarleyDistortionState)) < 0) {
         customPrintf("[ERROR] ❌ No se pudo inicializar la memoria compartida.\n");
         return 1;
-    } else {
-        customPrintf("[DEBUG] ✅ Memoria compartida inicializada correctamente.\n");
     }
 
     // Conexión a Gotham para registro
@@ -891,7 +883,7 @@ int main(int argc, char *argv[]){
     }
 
     if (response.type == 0x02 && response.data_length == 0){
-        customPrintf("Connected to Mr. J System, ready to listen to Fleck petitions\n\n");
+        customPrintf("\nConnected to Mr. J System, ready to listen to Fleck petitions\n\n");
         customPrintf("Waiting for connections...\n");
     }
     else if (response.type == 0x02 && strcmp(response.data, "CON_KO") == 0) {

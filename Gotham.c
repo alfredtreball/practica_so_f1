@@ -24,6 +24,10 @@
 #include <ctype.h>
 #include <signal.h>
 #include <time.h> // Para time()
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
+#include <stdio.h>
 
 #include "GestorTramas/GestorTramas.h"
 #include "FileReader/FileReader.h"
@@ -31,6 +35,7 @@
 #include "DataConversion/DataConversion.h"
 #include "Networking/Networking.h"
 #include "Logging/Logging.h"
+#include "Semafors/semaphore_v2.h"
 
 volatile sig_atomic_t stop_server = 0; // Bandera para indicar el cierre
 
@@ -82,6 +87,10 @@ typedef struct {
 WorkerManager *workerManager = NULL;
 ClientManager *clientManager = NULL;
 
+int arkham_pipe[2];
+int arkham_pid = -1;
+semaphore arkham_sem;
+
 WorkerManager *createWorkerManager();
 void freeWorkerManager(WorkerManager *manager);
 void *gestionarConexion(void *arg);
@@ -99,6 +108,7 @@ void removeClientBySocket(ClientManager *manager, int socket_fd);
 void listClients(ClientManager *manager);
 void handleSigint(int sig);
 void alliberarMemoria(GothamConfig *gothamConfig);
+void logEvent(const char *msg);
 
 void *enviarHeartbeat(void *arg) {
     ConnectionArgs *args = (ConnectionArgs *)arg;
@@ -134,6 +144,7 @@ void *enviarHeartbeat(void *arg) {
                 if (escribirTrama(worker->socket_fd, &heartbeat) < 0) {
                     customPrintf("[ERROR]: Error enviando HEARTBEAT a worker.");
                     // Cerrar socket y eliminar worker
+                    shutdown(worker->socket_fd, SHUT_RDWR);
                     close(worker->socket_fd);
                     logoutWorkerBySocket(worker->socket_fd, workerManager);
                     i--;  // Ajustar índice tras eliminar worker
@@ -145,6 +156,7 @@ void *enviarHeartbeat(void *arg) {
         sleep(1); // Esperar antes del siguiente HEARTBEAT
     }
 
+    free(args);
     return NULL;
 }
 
@@ -213,7 +225,7 @@ void addClient(ClientManager *manager, const char *username, const char *ip, int
         manager->clients = new_clients;
     }
 
-    // Añadir un nuevo cliente
+    //Añadir un nuevo cliente
     ClientInfo *client = &manager->clients[manager->clientCount++];
     strncpy(client->username, username, sizeof(client->username) - 1);
     strncpy(client->ip, ip, sizeof(client->ip) - 1);
@@ -360,6 +372,12 @@ void registrarWorker(const char *payload, WorkerManager *manager, int client_fd)
 
     // Registrar nuevo worker
     WorkerInfo *worker = &manager->workers[manager->workerCount++];
+    char *logLine = NULL;
+    asprintf(&logLine, "Worker connected: %s - IP: %s, Port: %d", type, ip, port);
+    if (logLine) {
+        logEvent(logLine);
+        free(logLine);
+    }
     memset(worker, 0, sizeof(WorkerInfo));
     strncpy(worker->type, type, sizeof(worker->type) - 1);
     strncpy(worker->ip, ip, sizeof(worker->ip) - 1);
@@ -373,11 +391,11 @@ void registrarWorker(const char *payload, WorkerManager *manager, int client_fd)
         manager->mainMediaWorker = worker;
     }
 
-    //Mensaje personalizado según el tipo
+    //Mensajeún el tipo
     if (strcasecmp(type, "TEXT") == 0) {
-        customPrintf("New Enigma worker connected - ready to distort!\n\n");
+        customPrintf("\nNew Enigma  personalizado segworker connected - ready to distort!\n");
     } else if (strcasecmp(type, "MEDIA") == 0) {
-        customPrintf("New Harley worker connected - ready to distort!\n\n");
+        customPrintf("\nNew Harley worker connected - ready to distort!\n");
     }
 
     pthread_mutex_unlock(&manager->mutex);
@@ -462,9 +480,14 @@ void asignarNuevoWorkerPrincipal(WorkerInfo *worker) {
     frame.timestamp = (uint32_t)time(NULL);
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
-    customPrintf("\n[INFO]: Asignando nuevo Worker principal...\n");
+    char *logLine = NULL;
+    asprintf(&logLine, "New main worker assigned: %s - IP: %s, Port: %d", worker->type, worker->ip, worker->port);
+    if (logLine) {
+        logEvent(logLine);
+        free(logLine);
+    }
     if (escribirTrama(worker->socket_fd, &frame) == 0) {
-        logSuccess("[SUCCESS]: Trama 0x08 enviada correctamente al Worker principal.");
+        logSuccess("[SUCCESS]: Trama 0x08 enviada correctamente al Worker principal.\n");
     } else {
         customPrintf("[ERROR]: Error enviando la trama 0x08 al Worker principal.");
     }
@@ -517,12 +540,10 @@ void reasignarWorkersPrincipales(WorkerManager *manager) {
     for (int i = 0; i < manager->workerCount; i++) {
         if (manager->mainTextWorker == NULL && strcasecmp(manager->workers[i].type, "TEXT") == 0) {
             manager->mainTextWorker = &manager->workers[i];
-            customPrintf("\n[INFO]: Nuevo Worker principal de texto asignado.\n");
             asignarNuevoWorkerPrincipal(manager->mainTextWorker);
         }
         if (manager->mainMediaWorker == NULL && strcasecmp(manager->workers[i].type, "MEDIA") == 0) {
             manager->mainMediaWorker = &manager->workers[i];
-            customPrintf("\n[INFO]: Nuevo Worker principal de multimedia asignado.\n");
             asignarNuevoWorkerPrincipal(manager->mainMediaWorker);
         }
     }
@@ -657,6 +678,20 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
 
             // Registrar al cliente en el ClientManager
             addClient(clientManager, username, ip, client_fd);
+
+            char *formattedName = strdup(username);
+            if (formattedName) {
+                formattedName[0] = toupper(formattedName[0]);
+
+                char *logLine = NULL;
+                asprintf(&logLine, "Client connected: %s", formattedName);
+                if (logLine) {
+                    logEvent(logLine);
+                    free(logLine);
+                }
+
+                free(formattedName);
+            }
             
             char *log_message = NULL;
             asprintf(&log_message, "\nNew user connected: %s.\n\n", username);
@@ -677,8 +712,6 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             break;
 
         case 0x07:
-            customPrintf("\n[INFO]: Trama de desconexión recibida.\n");
-
             // Llamamos a la función centralizada para manejar desconexión
             handleDisconnectFrame(frame, client_fd, manager, clientManager);
 
@@ -686,7 +719,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             break;
 
         case 0x10: // DISTORT
-            customPrintf("\n[INFO]: Procesando comando DISTORT...\n");
+            customPrintf("\nProcesando comando DISTORT de Fleck\n");
 
             // Parsear el payload recibido: mediaType y fileName
             char mediaType[10], fileName[256];
@@ -723,7 +756,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
                 break;
             }
 
-            // Obtener el nombre del cliente según su socket
+            //Obtener el nombre del cliente según su socket
             char clientName[64] = "Unknown";
             pthread_mutex_lock(&clientManager->mutex);
             for (int i = 0; i < clientManager->clientCount; i++) {
@@ -733,6 +766,13 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
                 }
             }
             pthread_mutex_unlock(&clientManager->mutex);
+
+            char *logLine = NULL;
+            asprintf(&logLine, "Client %s requested distortion of file: %s", clientName, fileName);
+            if (logLine) {
+                logEvent(logLine);
+                free(logLine);
+            }
 
             // Mensaje informativo personalizado
             if (strcasecmp(mediaType, "TEXT") == 0) {
@@ -823,7 +863,7 @@ void handleDisconnectFrame(const Frame *frame, int client_fd, WorkerManager *man
 
     int isWorker = 0;
     int isClient = 0;
-    WorkerInfo *disconnectedWorker = NULL; // ✅ Definir antes de usar
+    WorkerInfo *disconnectedWorker = NULL; 
 
     // Verificar si es un Worker
     pthread_mutex_lock(&manager->mutex);
@@ -859,6 +899,13 @@ void handleDisconnectFrame(const Frame *frame, int client_fd, WorkerManager *man
     } 
 
     if (disconnectedWorker) {
+            char *logLine = NULL;
+            asprintf(&logLine, "Worker disconnected: %s - IP: %s, Port: %d",
+                    disconnectedWorker->type, disconnectedWorker->ip, disconnectedWorker->port);
+            if (logLine) {
+                logEvent(logLine);
+                free(logLine);
+            }
             close(client_fd);  // Cerrar el socket antes de eliminar el Worker
             int wasMain = (manager->mainTextWorker == disconnectedWorker || manager->mainMediaWorker == disconnectedWorker);
             if (logoutWorkerBySocket(client_fd, manager) == 0) {
@@ -869,11 +916,27 @@ void handleDisconnectFrame(const Frame *frame, int client_fd, WorkerManager *man
                 }
             }
         } else if (isClient) {
-            customPrintf("\n[INFO]: Identificado como Cliente. Procesando desconexión...\n");
+            customPrintf("\nIdentificado como Cliente. Procesando desconexión...\n");
+            char *clientName = NULL;
+
+            pthread_mutex_lock(&clientManager->mutex);
+            for (int i = 0; i < clientManager->clientCount; i++) {
+                if (clientManager->clients[i].socket_fd == client_fd) {
+                    asprintf(&clientName, "Client disconnected: %s", clientManager->clients[i].username);
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&clientManager->mutex);
+
+            if (clientName) {
+                logEvent(clientName);
+                free(clientName);
+            }
+
             close(client_fd);
             removeClientBySocket(clientManager, client_fd);
         } else {
-            logWarning("[WARNING]: Socket no corresponde a un Worker ni a un Cliente.");
+            logWarning("[WARNING]: Socket no corresponde a un Worker ni a un Cliente.\n");
         }
 }
 
@@ -887,6 +950,9 @@ void handleSigint(int sig) {
     (void)sig; // Ignorar el valor de la señal
     customPrintf("\nS'ha rebut SIGINT. Tancant el sistema...\n");
     stop_server = 1;
+
+    SEM_destructor(&arkham_sem);
+    close(arkham_pipe[1]); // asegúrate de cerrar el lado de escritura
 
     // Liberar los recursos de WorkerManager
     if (workerManager) {
@@ -904,6 +970,7 @@ void handleSigint(int sig) {
     if (clientManager) {
         pthread_mutex_lock(&clientManager->mutex);
         for (int i = 0; i < clientManager->clientCount; i++) {
+            shutdown(clientManager->clients[i].socket_fd, SHUT_RDWR);
             close(clientManager->clients[i].socket_fd); // Cerrar el socket del cliente
         }
         pthread_mutex_unlock(&clientManager->mutex);
@@ -933,6 +1000,15 @@ void handleSigint(int sig) {
 
     logSuccess("Sistema tancat correctament.\n");
     exit(EXIT_SUCCESS);
+}
+
+
+//Loggear eventos de Arkham
+void logEvent(const char *msg) {
+    SEM_wait(&arkham_sem);
+    write(arkham_pipe[1], msg, strlen(msg));
+    write(arkham_pipe[1], "\n", 1);  // Asegura fin de línea
+    SEM_signal(&arkham_sem);
 }
 
 // Funció principal del servidor Gotham
@@ -1006,8 +1082,46 @@ int main(int argc, char *argv[]) {
         customPrintf("[ERROR]: No se pudo crear el hilo de HEARTBEAT.");
         free(heartbeatArgs); // Liberar en caso de error
         exit(EXIT_FAILURE);
+    } else {
+        pthread_detach(heartbeatThread);         
     }
-    pthread_detach(heartbeatThread);
+
+    if (pipe(arkham_pipe) == -1) {
+        perror("pipe");
+        exit(EXIT_FAILURE);
+    }
+
+    arkham_pid = fork();
+    if (arkham_pid < 0) {
+        perror("fork");
+        exit(EXIT_FAILURE);
+    } else if (arkham_pid == 0) {
+        // Código de Arkham
+        close(arkham_pipe[1]); // Cierra escritura
+        dup2(arkham_pipe[0], STDIN_FILENO); // Redirige stdin
+        execl("./arkham", "arkham", NULL);
+        perror("execl Arkham");
+        exit(EXIT_FAILURE);
+    }
+
+    close(arkham_pipe[0]); // Cierra lectura en Gotham
+
+    // Inicialización del semáforo (solo en Gotham)
+    key_t key = ftok("Gotham.c", 'A');
+    if (key == -1) {
+        perror("ftok");
+        exit(EXIT_FAILURE);
+    }
+    if (SEM_constructor_with_name(&arkham_sem, key) < 0) {
+        write(STDERR_FILENO, "Error creando semáforo\n", 24);
+        exit(EXIT_FAILURE);
+    }
+
+    if (SEM_init(&arkham_sem, 1) < 0) {
+        write(STDERR_FILENO, "Error inicializando semáforo\n", 30);
+        exit(EXIT_FAILURE);
+    }
+
 
     // Bucle principal de aceptación de conexiones
     while (!stop_server) {
@@ -1030,6 +1144,9 @@ int main(int argc, char *argv[]) {
         if (FD_ISSET(server_fds.server_fd_fleck, &read_fds)) {
             int client_fd = accept_connection(server_fds.server_fd_fleck);
             if (client_fd >= 0) {
+                customPrintf("[DEBUG] Socket %d acceptat (worker)\n", client_fd);
+            }
+            if (client_fd >= 0) {
                 pthread_t thread;
                 ConnectionArgs *args = malloc(sizeof(ConnectionArgs));
                 if (!args) {
@@ -1046,7 +1163,7 @@ int main(int argc, char *argv[]) {
                     free(args);
                     close(client_fd);
                 } else {
-                    pthread_detach(thread);
+                    pthread_detach(thread); // Liberar recursos del thread automáticamente
                 }
             }
         }
@@ -1093,7 +1210,14 @@ int main(int argc, char *argv[]) {
 
     close(server_fds.server_fd_fleck);
     close(server_fds.server_fd_worker);
+    close(arkham_pipe[1]); // asegúrate de cerrar el lado de escritura
+
+    // Esperar a que el hilo HEARTBEAT termine
+    SEM_destructor(&arkham_sem);
+    close(arkham_pipe[1]);
+    for (int fd = 3; fd < 1024; ++fd) close(fd);
 
     customPrintf("\nServidor Gotham cerrado correctamente.\n");
+    
     return EXIT_SUCCESS;
 }

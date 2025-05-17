@@ -780,7 +780,7 @@ void processReceivedFrame(int gothamSocket, const Frame *response){
             int distortionCount = 0;
         
             if (load_enigma_distortion_state(&harleySharedMemory, recoveredDistortions, &distortionCount) == 0) {
-                customPrintf("Se encontraron %d distorsiones en memoria compartida.\n", distortionCount);
+                customPrintf("Hi ha distorsions pendents\n", distortionCount);
             } else {
                 customPrintf("No hay distorsiones pendientes.");
             }
@@ -848,8 +848,6 @@ int main(int argc, char *argv[]){
     if (init_shared_memory(&harleySharedMemory, 1234, sizeof(EnigmaDistortionState)) < 0) {
         customPrintf("[ERROR] ❌ No se pudo inicializar la memoria compartida.\n");
         return 1;
-    } else {
-        customPrintf("[DEBUG] ✅ Memoria compartida inicializada correctamente.\n");
     }
 
     // Conexión a Gotham para registro

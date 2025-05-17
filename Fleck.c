@@ -304,8 +304,7 @@ void *listenToHarley() {
                 close(fileDescriptor);
                 statusResult = 100.0;
                 fileDescriptor = -1;
-                logInfo("[SUCCESS]: Archivo recibido completamente.");
-                customPrintf("\n%d\n", bytesRebuts);
+                customPrintf("\nArxiu rebut completament\n");
                 fileComplete = 1;
                 pthread_mutex_lock(&distortionMutex);
                 distortionInProgress = 0;
@@ -318,10 +317,10 @@ void *listenToHarley() {
                 calculate_md5(globalState->filePath, calculatedMD5);
                 
                 if (strcmp(calculatedMD5, receivedMD5Sum) == 0) {
-                    logInfo("[SUCCESS]: MD5 correcto. Enviando CHECK_OK a Harley.");
+                    customPrintf("Envio md5sum correcte a Harley\n");
                     sendMD5Response(globalState->workerSocket, "CHECK_OK");
                 } else {
-                    customPrintf("[ERROR]: MD5 incorrecto. Enviando CHECK_KO a Harley.");
+                    customPrintf("MD5 incorrecte. Enviant CHECK_KO a Harley.");
                     sendMD5Response(globalState->workerSocket, "CHECK_KO");
                 }
                 break;
@@ -342,7 +341,7 @@ void *listenToHarley() {
 
             if (request->type == 0x06) { // Confirmación de MD5
                 if (strcmp(request->data, "CHECK_OK") == 0) {
-                    customPrintf("\n[INFO]: Harley ha confirmado correctamente el MD5 del archivo recibido (CHECK_OK).\n");
+                    customPrintf("Harley confirma md5sum correcte\n");
                     //Comprovar si harley segueix actiu
                     char buf[1];
                     int ret = recv(globalState->workerSocket, buf, 1, MSG_PEEK);
@@ -396,13 +395,13 @@ void *listenToEnigma() {
         int is_binary = -1;
         //customPrintf("Voy a leer de workerSocket: %d", globalState->workerSocket);
         if (receive_any_frame(globalState->workerSocket, &frame, &is_binary) != 0) {
-            customPrintf("Error recibiendo trama. Posible caída de Harley.\n");
+            customPrintf("Error recibiendo trama. Ha caigut Enigma.\n");
         
             // Detectar socket cerrado
             char tmp;
             int ret = recv(globalState->workerSocket, &tmp, 1, MSG_PEEK);
             if (ret == 0) {
-                customPrintf("Socket cerrado. Reasignando Harley...\n");
+                customPrintf("Socket cerrado. Reasignando Enigma...\n");
         
                 if (!solicitarReasignacionAWorker(globalState)) {
                     customPrintf("[ERROR]: No se pudo reasignar el Worker.\n");
@@ -472,10 +471,10 @@ void *listenToEnigma() {
                 calculate_md5(globalState->filePath, calculatedMD5);
                 
                 if (strcmp(calculatedMD5, receivedMD5Sum) == 0) {
-                    logInfo("[SUCCESS]: MD5 correcto. Enviando CHECK_OK a Enigma.\n");
+                    customPrintf("Envio md5sum correcte a Enigma\n");
                     sendMD5Response(globalState->workerSocket, "CHECK_OK");
                 } else {
-                    customPrintf("[ERROR]: MD5 incorrecto. Enviando CHECK_KO a Enigma.\n");
+                    customPrintf("MD5 incorrecte. Enviant CHECK_KO a Enigma.\n");
                     sendMD5Response(globalState->workerSocket, "CHECK_KO");
                 }
                 break;
@@ -541,7 +540,7 @@ void *listenToGotham(void *arg) {
     while (1) {
         Frame frame = {0};
         if (leerTrama(gothamSocket, &frame) != 0) {
-            customPrintf("\nError al leer el socket de Gotham. Gotham se ha desconectado.\n");
+            customPrintf("\nGotham s'ha desconnectat.\n");
             close(gothamSocket);
             gothamSocket = -1;
             break; // Salir del bucle si hay un error o desconexión
@@ -1013,8 +1012,6 @@ void sendMD5Response(int clientSocket, const char *status) {
     response.timestamp = (uint32_t)time(NULL);
     response.checksum = calculate_checksum(response.data, response.data_length, 1);
 
-    customPrintf("[DEBUG] 🔵 Enviando MD5 a Fleck: %s\n", status);
-
     if (clientSocket < 0) {
         customPrintf("[ERROR]: El socket de Fleck ya está cerrado. No se puede enviar MD5.");
         return;
@@ -1022,9 +1019,7 @@ void sendMD5Response(int clientSocket, const char *status) {
 
     int result = escribirTrama(clientSocket, &response);
     if (result < 0) {
-        customPrintf("[ERROR]: Fallo al enviar la respuesta MD5. Socket cerrado o desconectado.");
-    } else {
-        logInfo("[SUCCESS]: Trama MD5 enviada correctamente.");
+        customPrintf("[ERROR]: Fallo al enviar la respuesta MD5. Socket cerrado o desconectado.\n");
     }
 }
 
@@ -1124,7 +1119,6 @@ int solicitarReasignacionAWorker(DistortionState *globalState) {
     frame.timestamp = (uint32_t)time(NULL);
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
-    customPrintf("[INFO]: Enviando solicitud de reasignación de Worker a Goham... 1");
     if (escribirTrama(gothamSocket, &frame) < 0) {
         customPrintf("[ERROR]: No se pudo enviar la solicitud de reasignación a Gotham.");
         return 0; // Fallo en la reasignación
@@ -1264,9 +1258,8 @@ void sendDisconnectFrameToGotham(const char *userName) {
     }
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 0);
 
-    logInfo("[INFO]: Enviando trama de desconexión a Gotham...");
     if (escribirTrama(gothamSocket, &frame) < 0) {
-        customPrintf("[ERROR]: Fallo al enviar trama de desconexión a Gotham.");
+        customPrintf("Fallo al enviar trama de desconexión a Gotham.\n");
     }
 }
 
@@ -1290,7 +1283,6 @@ void sendDisconnectFrameToWorker(int workerSocket, const char *userName) {
 
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
-    logInfo("[INFO]: Enviando trama de desconexión al Worker...");
     if (escribirTrama(workerSocket, &frame) < 0) {
         customPrintf("[ERROR]: Fallo al enviar trama de desconexión al Worker.");
     }
@@ -1315,7 +1307,7 @@ void signalHandler(int sig) {
             workerSocket = -1;
         }
 
-        customPrintf("\n\n[INFO]: Fleck desconectado. Saliendo...\n");
+        customPrintf("\nDesconnexió completada\n");
         // Liberar recursos asignados
         releaseResources();
         exit(0);
@@ -1351,7 +1343,7 @@ int main(int argc, char *argv[]) {
         command = readUntil(STDIN_FILENO, '\n');
 
         if (command == NULL || strlen(command) == 0) {
-            printF("\033[1;33m[WARNING]: Comanda buida. Si us plau, introdueix una comanda vàlida.\n\033[0m");
+            customPrintf("Comanda buida, si us plau, introdueix una comanda vàlida\n");
             free(command);
             continue;
         }

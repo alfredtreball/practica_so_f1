@@ -19,8 +19,6 @@ int process_compression(const char *filepath, int factor) {
         result = SO_compressImage((char *)filepath, factor);
         if (result != 0) {
             fprintf(stderr, "[ERROR]: Error al comprimir la imagen '%s'. Código de error: %d\n", filepath, result);
-        } else {
-            customPrintf("[INFO]: Imagen comprimida correctamente: '%s'.\n", filepath);
         }
     } else if (strcmp(extension, "wav") == 0) {
         // Comprimir audio

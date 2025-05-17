@@ -60,7 +60,7 @@ int send_frame_binary(int socket_fd, const BinaryFrame *frame) {
         return -1;
     }
     
-    return bytesEnviados;  // ✅ Devuelve el número de bytes enviados correctamente
+    return bytesEnviados;  //  Devuelve el número de bytes enviados correctamente
 }
 
 // Recibe un frame binario
