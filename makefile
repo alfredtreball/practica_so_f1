@@ -35,11 +35,11 @@ Fleck_Montserrat.exe: Fleck.c $(COMMON)
 
 # Compilació de Harley a Matagalls
 Harley_Matagalls.exe: Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c HarleySync/HarleySync.c
-	$(CC) $(CFLAGS) Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c -o Harley_Matagalls.exe -lm -lpthread
+	$(CC) $(CFLAGS) Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c HarleySync/HarleySync.c -o Harley_Matagalls.exe -lm -lpthread
 
 # Compilació de Enigma a Puigpedros
 Enigma_Puigpedros.exe: Enigma.c $(COMMON) EnigmaCompress/EnigmaCompress.c EnigmaSync/EnigmaSync.c
-	$(CC) $(CFLAGS) Enigma.c $(COMMON) EnigmaCompress/EnigmaCompress.c EnigmaSync/EnigmaSync.c -o Enigma_Puigpedros.exe
+	$(CC) $(CFLAGS) Enigma.c $(COMMON) EnigmaCompress/EnigmaCompress.c EnigmaSync/EnigmaSync.c -o Enigma_Puigpedros.exe -lm -lpthread
 
 # Regles per executar automàticament cada programa amb el fitxer de configuració corresponent
 gm: Gotham_Montserrat.exe

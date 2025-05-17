@@ -293,7 +293,6 @@ WorkerManager *createWorkerManager() {
 void listarWorkers(WorkerManager *manager) {
     pthread_mutex_lock(&manager->mutex); // Asegura acceso seguro a la lista dinámica
 
-    customPrintf("\n[INFO]: Lista de workers registrados: \n");
     for (int i = 0; i < manager->workerCount; i++) {
         WorkerInfo *worker = &manager->workers[i];
         char *log_message;
@@ -374,9 +373,14 @@ void registrarWorker(const char *payload, WorkerManager *manager, int client_fd)
         manager->mainMediaWorker = worker;
     }
 
-    pthread_mutex_unlock(&manager->mutex);
+    //Mensaje personalizado según el tipo
+    if (strcasecmp(type, "TEXT") == 0) {
+        customPrintf("New Enigma worker connected - ready to distort!\n\n");
+    } else if (strcasecmp(type, "MEDIA") == 0) {
+        customPrintf("New Harley worker connected - ready to distort!\n\n");
+    }
 
-    logSuccess("[SUCCESS]: Worker registrado correctamente.\n");
+    pthread_mutex_unlock(&manager->mutex);
 
     // Enviar ACK
     Frame response = {0};
@@ -653,6 +657,11 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
 
             // Registrar al cliente en el ClientManager
             addClient(clientManager, username, ip, client_fd);
+            
+            char *log_message = NULL;
+            asprintf(&log_message, "\nNew user connected: %s.\n\n", username);
+            customPrintf(log_message);
+            free(log_message); // Liberar memoria asignada por asprintf
 
             // Enviar respuesta de éxito
             response.type = 0x01;
@@ -663,7 +672,6 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             break;
 
         case 0x02: // REGISTER
-            customPrintf("\n[DEBUG]: Processant registre de worker...\n");
             registrarWorker(frame->data, manager, client_fd);
             listarWorkers(manager);
             break;
@@ -713,6 +721,26 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
                 customPrintf("[ERROR]: No se encontró un worker para el archivo especificado.\n");
                 //handleWorkerFailure(mediaType, manager, client_fd);
                 break;
+            }
+
+            // Obtener el nombre del cliente según su socket
+            char clientName[64] = "Unknown";
+            pthread_mutex_lock(&clientManager->mutex);
+            for (int i = 0; i < clientManager->clientCount; i++) {
+                if (clientManager->clients[i].socket_fd == client_fd) {
+                    strncpy(clientName, clientManager->clients[i].username, sizeof(clientName) - 1);
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&clientManager->mutex);
+
+            // Mensaje informativo personalizado
+            if (strcasecmp(mediaType, "TEXT") == 0) {
+                customPrintf("%s has sent a text distortion petition – redirecting %s to Enigma worker.\n\n",
+                            clientName, clientName);
+            } else if (strcasecmp(mediaType, "MEDIA") == 0) {
+                customPrintf("%s has sent a media distortion petition – redirecting %s to Harley worker.\n\n",
+                            clientName, clientName);
             }
 
             // Preparar respuesta con la información del Worker
@@ -926,7 +954,6 @@ int main(int argc, char *argv[]) {
     }
 
     readConfigFileGeneric(argv[1], config, CONFIG_GOTHAM);
-    customPrintf("\nConfiguración cargada correctamente.\n");
 
     ServerFds server_fds;
     global_server_fds = &server_fds; // Asignar el puntero global
@@ -960,8 +987,6 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    logSuccess("Servidores iniciados correctamente.\n");
-
     // Crear el WorkerManager compartido
     manager = createWorkerManager();
     clientManager = createClientManager();
@@ -983,7 +1008,6 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
     pthread_detach(heartbeatThread);
-    customPrintf("\n[INFO]: Hilo de HEARTBEAT iniciado.\n");
 
     // Bucle principal de aceptación de conexiones
     while (!stop_server) {
@@ -1031,7 +1055,6 @@ int main(int argc, char *argv[]) {
         if (FD_ISSET(server_fds.server_fd_worker, &read_fds)) {
             int client_fd = accept_connection(server_fds.server_fd_worker);
             if (client_fd >= 0) {
-                customPrintf("\n[INFO]: Conexión aceptada desde Harley/Enigma.\n");
                 pthread_t thread;
                 ConnectionArgs *args = malloc(sizeof(ConnectionArgs));
                 if (!args) {

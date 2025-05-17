@@ -85,13 +85,8 @@ int accept_connection(int server_fd) {
         return -1;
     }
 
-    char *client_ip = inet_ntoa(client_addr.sin_addr);
-    int client_port = client_addr.sin_port;
-
-    char *msg = NULL;
-    asprintf(&msg, "Nueva conexión aceptada desde IP: %s, Puerto: %d\n", client_ip, client_port);
-    printF(msg);
-    free(msg);
+    //char *client_ip = inet_ntoa(client_addr.sin_addr);
+    //int client_port = client_addr.sin_port;
 
     return client_fd;
 }

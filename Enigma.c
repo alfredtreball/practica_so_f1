@@ -99,7 +99,6 @@ void sendDisconnectFrameToGotham(const char *mediaType)
     if (gothamSocket >= 0) {
         close(gothamSocket);
         gothamSocket = -1;
-        customPrintf("[INFO]: Conexión con Gotham cerrada correctamente.");
     }
 }
 
@@ -266,6 +265,18 @@ void *handleFleckFrames(void *arg){
                         break;
                     }
 
+                    // Mostrar mensajes personalizados
+                    char *logMessage = NULL;
+                    asprintf(&logMessage, "\nNew user connected: %s.\n\n", userName);
+                    customPrintf(logMessage);
+                    free(logMessage);
+
+                    asprintf(&logMessage, "New request - %s wants to distort some media, with factor %s.", userName, factor);
+                    customPrintf(logMessage);
+                    free(logMessage);
+
+                    customPrintf("\nReceiving original text…\n");
+
                     //Guardar variables
                     strncpy(receivedFileName, fileName, sizeof(receivedFileName) - 1);
                     strncpy(expectedMD5, md5Sum, sizeof(expectedMD5) - 1);
@@ -295,7 +306,6 @@ void *handleFleckFrames(void *arg){
 
                     save_enigma_distortion_state(&harleySharedMemory, receivedFileName, 0, atoi(receivedFactor), expectedMD5, clientSocket, STATUS_PENDING);
 
-                    customPrintf("[INFO]: Enviando confirmación 0x03 a Fleck.");
                     send_frame_with_ok(clientSocket);
                 }
                 else if (request.type == 0x06) {
@@ -359,7 +369,7 @@ void *sendCompressedFileToFleck(void *args) {
         return NULL;
     }
 
-    customPrintf("On: %d", &offset);
+    customPrintf("On: %d", offset);
 
     //Saltar al punto donde lo dejó el anterior Harley
     if (lseek(fd, offset, SEEK_SET) < 0) {
@@ -373,9 +383,6 @@ void *sendCompressedFileToFleck(void *args) {
 
     char buffer[247]; 
     ssize_t bytesRead;
-
-    customPrintf("[INFO]: Iniciando envío del archivo comprimido por tramas 0x05...");
-    customPrintf("bytes totals: %d\n\n", fileSize);
 
     int bytesAcum = 0;
 
@@ -460,6 +467,12 @@ void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSi
         return;
     }
 
+    static int distortionLogged = 0;
+    if (!distortionLogged) {
+        customPrintf("Distorting...\n");
+        distortionLogged = 1;
+    }
+
     // Escribir los datos en el archivo temporal
     ssize_t writtenBytes = write(tempFileDescriptor, binaryFrame->data, binaryFrame->data_length);
     if (writtenBytes == 0) {
@@ -471,11 +484,11 @@ void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSi
 
     lseek(tempFileDescriptor, 0, SEEK_SET);
     *currentFileSize = lseek(tempFileDescriptor, 0, SEEK_END);
-    customPrintf("\n%d\n", *currentFileSize);
     save_enigma_distortion_state(&harleySharedMemory, receivedFileName, *currentFileSize, atoi(receivedFactor), expectedMD5, clientSocket, STATUS_PENDING);
 
     // Verificar si se recibió el archivo completo
     if (*currentFileSize == expectedFileSize) {
+        distortionLogged = 0;
         save_enigma_distortion_state(&harleySharedMemory, receivedFileName, *currentFileSize, atoi(receivedFactor), expectedMD5, clientSocket, STATUS_IN_PROGRESS);
         customPrintf("\nARCHIVO COMPLETO RECIBIDO DE FLECK\n");
 
@@ -499,9 +512,6 @@ void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSi
             free(finalFilePath);
             return;
         }
-
-        customPrintf("\n[INFO]: MD5 calculado del archivo recibido: %s \n", calculatedMD5);
-        customPrintf("\nMD5 esperado del archivo enviado de fleck: %s\n", expectedMD5);
 
         if (strcmp(expectedMD5, calculatedMD5) == 0) {
             sendMD5Response(clientSocket, "CHECK_OK");
@@ -590,19 +600,12 @@ void sendMD5Response(int clientSocket, const char *status) {
     response.timestamp = (uint32_t)time(NULL);
     response.checksum = calculate_checksum(response.data, response.data_length, 1);
 
-    customPrintf("[DEBUG] 🔵 Enviando MD5 a Fleck: %s\n", status);
-
     if (clientSocket < 0) {
         customPrintf("[ERROR]: El socket de Fleck ya está cerrado. No se puede enviar MD5.");
         return;
     }    
 
-    int result = escribirTrama(clientSocket, &response);
-    if (result < 0) {
-        customPrintf("[ERROR]: Fallo al enviar la respuesta MD5. Socket cerrado o desconectado.");
-    } else {
-        customPrintf("[SUCCESS]: Trama MD5 enviada correctamente.");
-    }
+    escribirTrama(clientSocket, &response);
 }
 
 // Función para enviar la trama del archivo distorsionado

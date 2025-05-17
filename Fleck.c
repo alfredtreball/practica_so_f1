@@ -230,7 +230,7 @@ void *listenToHarley() {
     int fileComplete = 0;
 
     int receivedChunks = 1;
-    int bytesRebuts;
+    int bytesRebuts = globalState->fileOffset;
 
     while (1) {
         union {
@@ -239,7 +239,7 @@ void *listenToHarley() {
         } frame;
 
         int is_binary = -1;
-        //customPrintf("Voy a leer de workerSocket: %d", globalState->workerSocket);
+        
         if (receive_any_frame(globalState->workerSocket, &frame, &is_binary) != 0) {
             customPrintf("Error recibiendo trama. Posible caída de Harley.\n");
         
@@ -254,21 +254,20 @@ void *listenToHarley() {
                     free(globalState);
                     return NULL;
                 }
+
+                return NULL;
         
                 // Esperar hasta que el nuevo socket esté listo
                 while (workerSocket != globalState->workerSocket) {
-                    usleep(1000);
+                    usleep(10000000);
                     workerSocket = globalState->workerSocket;
                 }
-        
-                customPrintf("[INFO]: Reasignación completada. Continuando recepción...\n");
+
                 continue; // volver al bucle y seguir recibiendo
             } else {
                 break; // error fatal o socket válido pero con error
             }
         }
-
-        customPrintf("[DEBUG] 📨 Trama recibida de tipo: 0x%02X", frame.normal.type);
 
         //Decidir qué hacer según el type
         if (frame.normal.type == 0x05) {  // Trama binaria
@@ -280,7 +279,7 @@ void *listenToHarley() {
             }
 
             if (fileDescriptor == -1) {
-                fileDescriptor = open(globalState->filePath, O_WRONLY | O_CREAT | O_TRUNC, 0777);
+                fileDescriptor = open(globalState->filePath, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0777);
                 if (fileDescriptor < 0) {
                     customPrintf("[ERROR]: No se pudo abrir el archivo para escribir.");
                     continue;
@@ -295,12 +294,15 @@ void *listenToHarley() {
             }
 
             receivedChunks++;
-            statusResult = 50.0 + ((float)receivedChunks * DATA_SIZE / (float)globalState->fileSize) * 50.0;
 
             bytesRebuts += binaryResponse->data_length;
+            globalState->fileOffset = bytesRebuts;
+
+            statusResult = 50.0 + ((float)bytesRebuts / (float)globalState->fileSize) * 50.0;
 
             if (binaryResponse->data_length < DATA_SIZE) { 
                 close(fileDescriptor);
+                statusResult = 100.0;
                 fileDescriptor = -1;
                 logInfo("[SUCCESS]: Archivo recibido completamente.");
                 customPrintf("\n%d\n", bytesRebuts);
@@ -320,7 +322,6 @@ void *listenToHarley() {
                     sendMD5Response(globalState->workerSocket, "CHECK_OK");
                 } else {
                     customPrintf("[ERROR]: MD5 incorrecto. Enviando CHECK_KO a Harley.");
-                    customPrintf("md5: %s\n md5 expected: %s\nfileComplete: %s\n", calculatedMD5, receivedMD5Sum, fileComplete);
                     sendMD5Response(globalState->workerSocket, "CHECK_KO");
                 }
                 break;
@@ -337,8 +338,6 @@ void *listenToHarley() {
                     continue;
                 }
                 strncpy(receivedMD5Sum, md5Sum, sizeof(receivedMD5Sum) - 1);
-                customPrintf("md5: %s\n", md5Sum);
-                customPrintf("md5 expected: %s\n", receivedMD5Sum);
             }
 
             if (request->type == 0x06) { // Confirmación de MD5
@@ -410,6 +409,8 @@ void *listenToEnigma() {
                     free(globalState);
                     return NULL;
                 }
+
+                return NULL;
         
                 // Esperar hasta que el nuevo socket esté listo
                 while (workerSocket != globalState->workerSocket) {
@@ -423,8 +424,6 @@ void *listenToEnigma() {
                 break; // error fatal o socket válido pero con error
             }
         }
-
-        customPrintf("[DEBUG] 📨 Trama recibida de Enigma de tipo: 0x%02X", frame.normal.type);
 
         //Decidir qué hacer según el type
         if (frame.normal.type == 0x05) {  // Trama binaria
@@ -457,6 +456,7 @@ void *listenToEnigma() {
 
             if (binary->data_length < DATA_SIZE) { 
                 close(fileDescriptor);
+                statusResult = 100.0;
                 fileDescriptor = -1;
                 logInfo("[SUCCESS]: Archivo recibido completamente.");
                 customPrintf("\n%d\n", bytesReceived);
@@ -476,7 +476,6 @@ void *listenToEnigma() {
                     sendMD5Response(globalState->workerSocket, "CHECK_OK");
                 } else {
                     customPrintf("[ERROR]: MD5 incorrecto. Enviando CHECK_KO a Enigma.\n");
-                    customPrintf("md5: %s\n md5 expected: %s\nfileComplete: %s\n", calculatedMD5, receivedMD5Sum, fileComplete);
                     sendMD5Response(globalState->workerSocket, "CHECK_KO");
                 }
                 break;
@@ -491,8 +490,6 @@ void *listenToEnigma() {
                     continue;
                 }
                 strncpy(receivedMD5Sum, md5Sum, sizeof(receivedMD5Sum) - 1);
-                customPrintf("md5: %s\n", md5Sum);
-                customPrintf("md5 expected: %s\n", receivedMD5Sum);
             }
 
             if (frame.normal.type == 0x06) { // Confirmación de MD5
@@ -621,7 +618,7 @@ void *listenToGotham(void *arg) {
             
                 int newWorkerSocket = connect_to_server(workerIp, workerPort);
                 if (newWorkerSocket < 0) {
-                    customPrintf("[ERROR]: No se pudo conectar al Worker.");
+                    customPrintf("[ERROR]: No se pudo conectar al Worker.\n\n");
                     free(globalState);
                     globalState = NULL;
                     break;
@@ -630,8 +627,6 @@ void *listenToGotham(void *arg) {
                 customPrintf("[SUCCESS]: Conexión establecida con el nuevo Worker. IP = %s, PORT = %d\n", workerIp, workerPort);
                 usleep(1000); //1ms d'espera
                 globalState->workerSocket = newWorkerSocket; // Actualizar el socket global del Worker
-                customPrintf("Reasignació de worker, md5sum: %s\n", globalState->md5);
-                customPrintf("FILESIZE: %d\n\n", globalState->fileSize);
                 
                 sendDistortFileRequest(newWorkerSocket, globalState->fileName, globalState->fileSize, globalState->md5, globalState->factor);  
                 
@@ -761,9 +756,13 @@ void clearAllFinishedProgress() {
         }
     }
 
+    if (fileProgressCount == 0) {
+        distortedFileName[0] = '\0';
+    }
+
     pthread_mutex_unlock(&progressMutex);
 
-    printColor(ANSI_COLOR_GREEN, "[SUCCESS]: Completed downloads have been cleared from progress list.\n");
+    customPrintf("Completed downloads have been cleared from progress list.\n");
 }
 
 void processCommandWithGotham(const char *command) {
@@ -867,17 +866,15 @@ void processCommand(char *command, int gothamSocket) {
         customPrintf("[INFO]: Clearing all completed downloads...\n");
         clearAllFinishedProgress();    
     } else if (strcasecmp(cmd, "LOGOUT") == 0 && subCmd == NULL) {
-        logInfo("[INFO]: Procesando comando LOGOUT...");
+        logInfo("Thanks for using Mr. J System, see you soon, chaos lover :)\n");
         // Enviar trama de desconexión a Gotham
         if (gothamSocket >= 0) {
             sendDisconnectFrameToGotham(globalFleckConfig->user);
-            logInfo("[INFO]: Desconexión de Gotham completada.");
         }
         // Liberar todos los recursos
         releaseResources();
 
-        // Finalizar el programa
-        logInfo("[INFO]: Saliendo del programa Fleck.");
+        //Finalitzem programa
         exit(0);
     } else if (strcasecmp(cmd, "DISTORT") == 0) {
         if (gothamSocket == -1) {
@@ -888,7 +885,7 @@ void processCommand(char *command, int gothamSocket) {
     } else if (strcasecmp(cmd, "CHECK") == 0 && strcasecmp(subCmd, "STATUS") == 0 && extra == NULL) {
             checkStatus();
     } else {
-        printF("ERROR: Please input a valid command.");
+        customPrintf("ERROR: Please input a valid command.\n");
     }
 }
 
@@ -924,9 +921,6 @@ void *sendFileChunks(void *args) {
     }
 
     while ((bytesRead = read(fd, buffer, sizeof(buffer))) > 0) {    
-        
-        customPrintf("NOU bytes enviats: %d\n", totalSent);
-
         frame.type = 0x05;
         frame.data_length = bytesRead;
         memcpy(frame.data, buffer, bytesRead);
@@ -982,7 +976,7 @@ void *sendFileChunks(void *args) {
         customPrintf("\n[ERROR] ❌ write() devolvió error: errno=%d (%s)", errno, strerror(errno));
     } else if (bytesRead == 0) {
         // Terminó el fichero
-        customPrintf("\n[DEBUG] 🟢 write()=0 => fin del fichero. Se enviaron %zd bytes en total.", totalSent);
+        customPrintf("\nFitxer enviat correctament\n");
 
         // Aquí lanzas de nuevo el hilo 
         if (strcmp(globalState->mediaType, "MEDIA") == 0) {
@@ -1084,8 +1078,6 @@ DistortRequestArgs* sendDistortFileRequest(int workerSocket, const char *fileNam
         free(filePath);
         return NULL;
     }
-
-    customPrintf("[DEBUG][Fleck]: Confirmación 0x03 de Harley recibida correctamente.\n");
     
     // Cierra el socket anterior para forzar que el hilo anterior salga
     if (globalState->workerSocket != -1 && globalState->workerSocket != workerSocket) {
@@ -1218,7 +1210,6 @@ void processDistortFileCommand(const char *fileName, const char *factor, int got
     frame.checksum = calculate_checksum(frame.data, frame.data_length, 1);
 
     customPrintf("\nDistorsion started!\n");
-    logInfo("[INFO]: Enviando solicitud DISTORT a Gotham...");
     escribirTrama(gothamSocket, &frame);
 }
 
@@ -1333,7 +1324,8 @@ void signalHandler(int sig) {
 
 
 int main(int argc, char *argv[]) {
-    printF("Arthur user initialized\n");
+    customPrintf("\n\nArthur user initialized\n\n");
+    customPrintf("File read correctly: \n");
 
     if (argc != 2) {
         printF("\033[1;31m[ERROR]: Ús: ./fleck <fitxer de configuració>\n\033[0m");

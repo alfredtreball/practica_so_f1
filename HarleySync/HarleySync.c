@@ -73,9 +73,6 @@ int save_harley_distortion_state(SharedMemory *sm, const char *fileName, size_t 
             state->distortions[state->count].fleckSocketFD = fleckSocketFD;
             state->distortions[state->count].status = status; // Se asigna el estado correctamente
 
-            customPrintf("[DEBUG] 💾 Nueva distorsión agregada: %s, MD5=%s, byte=%ld, factor=%d, status=%d\n",
-                   fileName, md5Sum, currentByte, factor, state->distortions[state->count].status);
-
             state->count++;
         } else {
             customPrintf("[ERROR] ❌ No se pueden agregar más distorsiones, memoria llena.\n");
@@ -141,8 +138,6 @@ int remove_completed_distortions(SharedMemory *sm) {
         if (state->distortions[i].status != STATUS_DONE) {
             state->distortions[newCount] = state->distortions[i]; // Mover solo los que no estén completados
             newCount++;
-        } else {
-            customPrintf("[DEBUG] 🗑 Eliminando distorsión completada: %s\n", state->distortions[i].fileName);
         }
     }
 

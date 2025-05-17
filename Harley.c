@@ -70,9 +70,11 @@ typedef struct {
     off_t fileSize;
     char *compressedPath; // Ruta del archivo comprimido
     size_t offset; //Byte per continuar l'enviament
+    char userName[64];
 } SendCompressedFileArgs;
 
 char receivedFileName[256] = {0}; // Nombre del archivo recibido
+char receivedUserName[64] = {0};
 int tempFileDescriptor = -1;      // Descriptor del archivo temporal
 char expectedMD5[33];
 char receivedFactor[20];
@@ -99,7 +101,6 @@ void sendDisconnectFrameToGotham(const char *mediaType)
     if (gothamSocket >= 0) {
         close(gothamSocket);
         gothamSocket = -1;
-        customPrintf("[INFO]: Conexión con Gotham cerrada correctamente.");
     }
 }
 
@@ -112,6 +113,8 @@ void signalHandler(int sig) {
             return; // Si ya se está ejecutando, ignorar la segunda señal
         }
         already_exiting = 1;
+
+        customPrintf("\nDisconnecting, sending current file to another Harley worker.\n");
 
         if (lastFleckSocket >= 0) {
             shutdown(lastFleckSocket, SHUT_RDWR); // Cierra lectura y escritura
@@ -243,7 +246,6 @@ void *handleFleckFrames(void *arg){
             return NULL;
         }
         
-        //TODO MIRAR QUE ENTRI BÉ AQUÍ
         // Procesar trama binaria 0x05
         if (type == 0x05) {
             BinaryFrame binaryFrame;
@@ -266,10 +268,23 @@ void *handleFleckFrames(void *arg){
                         break;
                     }
 
+                    // Mostrar mensajes personalizados
+                    char *logMessage = NULL;
+                    asprintf(&logMessage, "\nNew user connected: %s.\n\n", userName);
+                    customPrintf(logMessage);
+                    free(logMessage);
+
+                    asprintf(&logMessage, "New request - %s wants to distort some media, with factor %s.", userName, factor);
+                    customPrintf(logMessage);
+                    free(logMessage);
+
+                    customPrintf("\nReceiving original text…\n");
+
                     //Guardar variables
                     strncpy(receivedFileName, fileName, sizeof(receivedFileName) - 1);
                     strncpy(expectedMD5, md5Sum, sizeof(expectedMD5) - 1);
                     strncpy(receivedFactor, factor, sizeof(receivedFactor) - 1);
+                    strncpy(receivedUserName, userName, sizeof(receivedUserName) - 1);
 
                     // Validar tamaño del archivo
                     expectedFileSize = strtoull(fileSizeStr, NULL, 10);
@@ -295,7 +310,6 @@ void *handleFleckFrames(void *arg){
 
                     save_harley_distortion_state(&harleySharedMemory, receivedFileName, 0, atoi(receivedFactor), expectedMD5, clientSocket, STATUS_PENDING);
 
-                    customPrintf("[INFO]: Enviando confirmación 0x03 a Fleck.");
                     send_frame_with_ok(clientSocket);
                 }
                 else if (request.type == 0x06) {
@@ -326,6 +340,11 @@ void *sendCompressedFileToFleck(void *args) {
     int clientSocket = sendArgs->clientSocket;
     size_t offset = sendArgs->offset;
 
+    char userName[64];
+    strncpy(userName, sendArgs->userName, sizeof(userName) - 1);
+    userName[sizeof(userName) - 1] = '\0'; // por seguridad
+
+
     // Duplicar filePath antes de liberar sendArgs
     char *filePath = strdup(sendArgs->filePath);
     if (!filePath) {
@@ -342,8 +361,6 @@ void *sendCompressedFileToFleck(void *args) {
         return NULL;
     }
 
-    customPrintf("\n[INFO]: El archivo comprimido se creó correctamente: %s\n", filePath);
-
     int fd = open(filePath, O_RDONLY, 0666);
     if (fd < 0) {
         customPrintf("[ERROR]: No se pudo abrir el archivo comprimido.");
@@ -359,8 +376,6 @@ void *sendCompressedFileToFleck(void *args) {
         return NULL;
     }
 
-    customPrintf("On: %d", &offset);
-
     //Saltar al punto donde lo dejó el anterior Harley
     if (lseek(fd, offset, SEEK_SET) < 0) {
         customPrintf("[ERROR]: No se pudo posicionar en el archivo comprimido.");
@@ -374,13 +389,10 @@ void *sendCompressedFileToFleck(void *args) {
     char buffer[247]; 
     ssize_t bytesRead;
 
-    customPrintf("[INFO]: Iniciando envío del archivo comprimido por tramas 0x05...");
-    customPrintf("bytes totals: %d\n\n", fileSize);
-
-    int bytesAcum = 0;
+    int bytesAcum = offset;
 
     while ((bytesRead = read(fd, buffer, sizeof(buffer))) > 0) {
-        customPrintf("\nbytesAcum: %d\n", bytesAcum);
+        customPrintf("Sending distorted text to %s\n", userName);
         frame.type = 0x05;
         frame.data_length = bytesRead;
         memcpy(frame.data, buffer, bytesRead);
@@ -398,13 +410,13 @@ void *sendCompressedFileToFleck(void *args) {
         save_harley_distortion_state(&harleySharedMemory, receivedFileName, bytesAcum, atoi(receivedFactor),
                                     expectedMD5, clientSocket, STATUS_DONE);
 
-        usleep(3000);
+        usleep(10000);
     }
 
     if (bytesRead < 0) {
-        customPrintf("[ERROR]: Fallo al leer el archivo comprimido.");
+        customPrintf("[ERROR]: Fallo al leer el archivo comprimido.\n");
     } else {
-        customPrintf("[INFO]: Envío del archivo comprimido completado.");
+        customPrintf("[INFO]: Envío del archivo comprimido completado.\n");
     }
 
     close(fd);
@@ -413,8 +425,7 @@ void *sendCompressedFileToFleck(void *args) {
 }
 
 
-void send_frame_with_error(int clientSocket, const char *errorMessage)
-{
+void send_frame_with_error(int clientSocket, const char *errorMessage){
     Frame errorFrame = {0};
     errorFrame.type = 0x03; // Tipo estándar para error
     strncpy(errorFrame.data, errorMessage, sizeof(errorFrame.data) - 1);
@@ -460,6 +471,12 @@ void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSi
         return;
     }
 
+    static int distortionLogged = 0;
+    if (!distortionLogged) {
+        customPrintf("Distorting...\n");
+        distortionLogged = 1;
+    }
+
     // Escribir los datos en el archivo temporal
     ssize_t writtenBytes = write(tempFileDescriptor, binaryFrame->data, binaryFrame->data_length);
     if (writtenBytes == 0) {
@@ -471,13 +488,12 @@ void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSi
 
     lseek(tempFileDescriptor, 0, SEEK_SET);
     *currentFileSize = lseek(tempFileDescriptor, 0, SEEK_END);
-    customPrintf("\n%d\n", *currentFileSize);
     save_harley_distortion_state(&harleySharedMemory, receivedFileName, *currentFileSize, atoi(receivedFactor), expectedMD5, clientSocket, STATUS_PENDING);
 
     // Verificar si se recibió el archivo completo
     if (*currentFileSize == expectedFileSize) {
+        distortionLogged = 0;
         save_harley_distortion_state(&harleySharedMemory, receivedFileName, *currentFileSize, atoi(receivedFactor), expectedMD5, clientSocket, STATUS_IN_PROGRESS);
-        customPrintf("\nARCHIVO COMPLETO RECIBIDO DE FLECK\n");
 
         // Cerrar el archivo temporal
         close(tempFileDescriptor);
@@ -499,9 +515,6 @@ void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSi
             free(finalFilePath);
             return;
         }
-
-        customPrintf("\n[INFO]: MD5 calculado del archivo recibido: %s \n", calculatedMD5);
-        customPrintf("\nMD5 esperado del archivo enviado de fleck: %s\n", expectedMD5);
 
         if (strcmp(expectedMD5, calculatedMD5) == 0) {
             sendMD5Response(clientSocket, "CHECK_OK");
@@ -590,19 +603,12 @@ void sendMD5Response(int clientSocket, const char *status) {
     response.timestamp = (uint32_t)time(NULL);
     response.checksum = calculate_checksum(response.data, response.data_length, 1);
 
-    customPrintf("[DEBUG] 🔵 Enviando MD5 a Fleck: %s\n", status);
-
     if (clientSocket < 0) {
         customPrintf("[ERROR]: El socket de Fleck ya está cerrado. No se puede enviar MD5.");
         return;
     }    
 
-    int result = escribirTrama(clientSocket, &response);
-    if (result < 0) {
-        customPrintf("[ERROR]: Fallo al enviar la respuesta MD5. Socket cerrado o desconectado.");
-    } else {
-        customPrintf("[SUCCESS]: Trama MD5 enviada correctamente.");
-    }
+    escribirTrama(clientSocket, &response);
 }
 
 // Función para enviar la trama del archivo distorsionado
@@ -632,8 +638,7 @@ void enviaTramaArxiuDistorsionat(int clientSocket, const char *fileSizeCompresse
     args->filePath = strdup(compressedFilePath);  // Duplicar la ruta
     args->fileSize = strtoull(fileSizeCompressed, NULL, 10);
     args->offset = offset;  
-
-    customPrintf("md5 calculat comprimit: %s\n", compressedMD5);
+    strncpy(args->userName, receivedUserName, sizeof(args->userName) - 1);
 
     // Crear un hilo para enviar el archivo comprimido
     pthread_t sendThread;
@@ -775,6 +780,8 @@ void processReceivedFrame(int gothamSocket, const Frame *response){
             // Recuperar todas las distorsiones en curso desde la memoria compartida, fer-la global per accedir al accept
             HarleyDistortionEntry recoveredDistortions[MAX_DISTORTIONS];
             int distortionCount = 0;
+
+            customPrintf("Another Harley worker has disconnecting while processing a file, recovering…\n");
         
             if (load_harley_distortion_state(&harleySharedMemory, recoveredDistortions, &distortionCount) == 0) {
                 customPrintf("Se encontraron %d distorsiones en memoria compartida.\n", distortionCount);
@@ -858,8 +865,6 @@ int main(int argc, char *argv[]){
         return 1;
     }
 
-    customPrintf("\n\nConnecting Harley worker to the system..\n");
-
     // Registro en Gotham
     Frame frame = {.type = 0x02, .timestamp = time(NULL)};
     snprintf(frame.data, sizeof(frame.data), "%s&%s&%d",
@@ -886,8 +891,8 @@ int main(int argc, char *argv[]){
     }
 
     if (response.type == 0x02 && response.data_length == 0){
-        printF("Connected to Mr. J System, ready to listen to Fleck petitions\n\n");
-        printF("Waiting for connections...\n");
+        customPrintf("Connected to Mr. J System, ready to listen to Fleck petitions\n\n");
+        customPrintf("Waiting for connections...\n");
     }
     else if (response.type == 0x02 && strcmp(response.data, "CON_KO") == 0) {
         printColor(ANSI_COLOR_RED, "[ERROR]: Registro rechazado por Gotham.");
@@ -934,7 +939,7 @@ int main(int argc, char *argv[]){
 
         if (load_harley_distortion_state(&harleySharedMemory, recoveredDistortions, &distortionCount) == 0) {
             for (int i = 0; i < distortionCount; i++) {
-                if (recoveredDistortions[i].fleckSocketFD == clientSocket) {    
+                //if (recoveredDistortions[i].fleckSocketFD == clientSocket) {    
                     ResumeArgs *args = malloc(sizeof(ResumeArgs));
                     strncpy(args->fileName, recoveredDistortions[i].fileName, sizeof(args->fileName));
                     strncpy(args->md5Sum, recoveredDistortions[i].md5Sum, sizeof(args->md5Sum));
@@ -947,10 +952,10 @@ int main(int argc, char *argv[]){
                     pthread_create(&resumeThread, NULL, resume_distortion, args);
                     pthread_detach(resumeThread);
                     continue;  
-                } else {
-                    customPrintf("[ERROR] Un `Fleck` diferente intentó continuar la distorsión de %s.\n",
-                                 recoveredDistortions[i].fileName);
-                }
+                //} else {
+                    //customPrintf("[ERROR] Un `Fleck` diferente intentó continuar la distorsión de %s.\n",
+                                //recoveredDistortions[i].fileName);
+                //}
             }
         }
 

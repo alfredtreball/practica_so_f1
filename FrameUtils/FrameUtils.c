@@ -162,10 +162,8 @@ int receive_any_frame(int socket_fd, void *frame, int *is_binary) {
 
     // 🔄 **Deserializar según el tipo**
     if (*is_binary) {
-        customPrintf("IS BINARY\n");
         return deserialize_frame_binary(buffer, (BinaryFrame *)frame);
     } else {
-        customPrintf("IS NORMAL\n");
         return deserialize_frame(buffer, (Frame *)frame);
     }
 }

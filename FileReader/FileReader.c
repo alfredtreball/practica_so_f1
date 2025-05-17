@@ -138,8 +138,6 @@ void readConfigFileGeneric(const char *configFile, void *configStruct, ConfigTyp
             line = readUntil(fd, '\n');
             config->portGotham = atoi(line);
             free(line);
-
-            printf("[DEBUG Config]: Usuario: %s\n", config->user);
             break;
         }
         default:
@@ -152,10 +150,10 @@ void readConfigFileGeneric(const char *configFile, void *configStruct, ConfigTyp
 
     switch (configType) {
         case CONFIG_ENIGMA: {
-            printF("Reading configuration file\n");
+            printF("\nReading configuration file\n");
             printF("Connecting Enigma worker to the system..\n");
             printF("Connected to Mr. J System, ready to listen to Fleck petitions\n\n");
-            printF("Waiting for connections...\n");
+            printF("Waiting for connections...\n\n");
             EnigmaConfig *config = (EnigmaConfig *)configStruct;
             printF("IP Gotham - "); printF(config->ipGotham);
 
@@ -175,7 +173,7 @@ void readConfigFileGeneric(const char *configFile, void *configStruct, ConfigTyp
         }
         case CONFIG_HARLEY: {
             HarleyConfig *config = (HarleyConfig *)configStruct;
-            printF("Reading configuration file\n");
+            printF("\nReading configuration file\n");
             printF("IP Gotham - "); printF(config->ipGotham);
 
             printF("\nPort Gotham - ");
