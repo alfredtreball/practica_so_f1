@@ -843,7 +843,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             response.data_length = strlen(response.data);
             response.checksum = calculate_checksum(response.data, response.data_length, 0);
 
-            customPrintf("\n[INFO]: Enviando información del Worker reasignado...\n");
+            customPrintf("\nEnviando información del Worker reasignado...\n");
             escribirTrama(client_fd, &response);
             break;
 
@@ -908,9 +908,9 @@ void handleDisconnectFrame(const Frame *frame, int client_fd, WorkerManager *man
             close(client_fd);  // Cerrar el socket antes de eliminar el Worker
             int wasMain = (manager->mainTextWorker == disconnectedWorker || manager->mainMediaWorker == disconnectedWorker);
             if (logoutWorkerBySocket(client_fd, manager) == 0) {
-                customPrintf("\n[INFO]: Worker desconectado correctamente.\n");
+                customPrintf("\nWorker desconectado correctamente.\n");
                 if (wasMain) {
-                    customPrintf("\n[INFO]: Reasignando nuevo Worker principal...\n");
+                    customPrintf("\nReasignando nuevo Worker principal...\n");
                     reasignarWorkersPrincipales(manager);
                 }
             }
