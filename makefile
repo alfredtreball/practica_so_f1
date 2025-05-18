@@ -18,7 +18,7 @@ CFLAGS = -Wall -Wextra -pthread -lrt -IFileReader -IStringUtils -IDataConversion
 COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataConversion.c \
          GestorTramas/GestorTramas.c Networking/Networking.c FrameUtils/FrameUtils.c \
          Logging/Logging.c MD5SUM/md5Sum.c FrameUtilsBinary/FrameUtilsBinary.c \
-         MessageQueue/MessageQueue.c CleanFiles/CleanFiles.c Shared_Memory/Shared_memory.c \
+         CleanFiles/CleanFiles.c Shared_Memory/Shared_memory.c \
 		 Semafors/semaphore_v2.c
 
 # Objectius per compilar cada executable

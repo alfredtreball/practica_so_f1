@@ -947,7 +947,6 @@ void alliberarMemoria(GothamConfig *gothamConfig) {
 
 void handleSigint(int sig) {
     (void)sig; // Ignorar el valor de la señal
-    customPrintf("\nS'ha rebut SIGINT. Tancant el sistema...\n");
     stop_server = 1;
 
     SEM_destructor(&arkham_sem);

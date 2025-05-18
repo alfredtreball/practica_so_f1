@@ -224,7 +224,7 @@ void *handleFleckFrames(void *arg){
             free(finalFilePath);
             return NULL;
         }
-        customPrintf("%d\n\n", expectedFileSize);
+
         // Posicionarse exactamente donde se quedó la recepción
         if (lseek(tempFileDescriptor, expectedFileSize, SEEK_SET) < 0) {
             customPrintf("[ERROR]: No se pudo posicionar en el offset de continuación.");
@@ -266,7 +266,7 @@ void *handleFleckFrames(void *arg){
                         send_frame_with_error(clientSocket, "CON_KO");
                         break;
                     }
-
+                    
                     // Mostrar mensajes personalizados
                     char *logMessage = NULL;
                     asprintf(&logMessage, "\nNew user connected: %s.\n\n", userName);
@@ -577,7 +577,7 @@ void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSi
                 return;
             }
 
-            // 🛠 Guardar estado como `STATUS_DONE` porque la compresión ha finalizado y está listo para enviarse
+            // Guardar estado como `STATUS_DONE` porque la compresión ha finalizado y está listo para enviarse
             save_harley_distortion_state(&harleySharedMemory, receivedFileName, *currentFileSize, atoi(receivedFactor), compressedMD5, clientSocket, STATUS_DONE);
 
             // Enviar la trama del archivo distorsionado
@@ -653,7 +653,7 @@ void enviaTramaArxiuDistorsionat(int clientSocket, const char *fileSizeCompresse
 
 void *resume_distortion(void *arg) {
     ResumeArgs *args = (ResumeArgs *)arg;
-    customPrintf("\n[RECOVERY] 🔄 Reanudando distorsión para %s desde byte %ld. Estado previo: %d\n", args->fileName, args->offset, args->status);
+    customPrintf("\nReanudando distorsión para %s desde byte %ld. Estado previo: %d\n", args->fileName, args->offset, args->status);
 
     // Construir la ruta completa del archivo
     char *filePath;
@@ -930,24 +930,19 @@ int main(int argc, char *argv[]){
         int distortionCount = 0;
 
         if (load_harley_distortion_state(&harleySharedMemory, recoveredDistortions, &distortionCount) == 0) {
-            for (int i = 0; i < distortionCount; i++) {
-                //if (recoveredDistortions[i].fleckSocketFD == clientSocket) {    
-                    ResumeArgs *args = malloc(sizeof(ResumeArgs));
-                    strncpy(args->fileName, recoveredDistortions[i].fileName, sizeof(args->fileName));
-                    strncpy(args->md5Sum, recoveredDistortions[i].md5Sum, sizeof(args->md5Sum));
-                    args->offset = recoveredDistortions[i].currentByte;
-                    args->factor = recoveredDistortions[i].factor;
-                    args->status = recoveredDistortions[i].status;
-                    args->clientSocket = clientSocket;
+            for (int i = 0; i < distortionCount; i++) {  
+                ResumeArgs *args = malloc(sizeof(ResumeArgs));
+                strncpy(args->fileName, recoveredDistortions[i].fileName, sizeof(args->fileName));
+                strncpy(args->md5Sum, recoveredDistortions[i].md5Sum, sizeof(args->md5Sum));
+                args->offset = recoveredDistortions[i].currentByte;
+                args->factor = recoveredDistortions[i].factor;
+                args->status = recoveredDistortions[i].status;
+                args->clientSocket = clientSocket;
 
-                    pthread_t resumeThread;
-                    pthread_create(&resumeThread, NULL, resume_distortion, args);
-                    pthread_detach(resumeThread);
-                    continue;  
-                //} else {
-                    //customPrintf("[ERROR] Un `Fleck` diferente intentó continuar la distorsión de %s.\n",
-                                //recoveredDistortions[i].fileName);
-                //}
+                pthread_t resumeThread;
+                pthread_create(&resumeThread, NULL, resume_distortion, args);
+                pthread_detach(resumeThread);
+                continue;  
             }
         }
 

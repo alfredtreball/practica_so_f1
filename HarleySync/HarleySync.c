@@ -87,7 +87,7 @@ int save_harley_distortion_state(SharedMemory *sm, const char *fileName, size_t 
 // Recupera el estado de la distorsión en caso de caída
 int load_harley_distortion_state(SharedMemory *sm, HarleyDistortionEntry *entries, int *count) {
     if (!sm || !sm->shmaddr) {
-        customPrintf("[ERROR] ❌ Memoria compartida no inicializada antes de recuperar estado.\n");
+        customPrintf("[ERROR] Memoria compartida no inicializada antes de recuperar estado.\n");
         return -1;
     }
 
@@ -102,15 +102,6 @@ int load_harley_distortion_state(SharedMemory *sm, HarleyDistortionEntry *entrie
 
             entries[*count] = state->distortions[i]; 
             (*count)++;
-        }
-    }
-
-    for (int i = 0; i < *count; i++) {
-        const char *status_str = "UNKNOWN";
-        switch (entries[i].status) {
-            case STATUS_PENDING:    status_str = "PENDING"; break;
-            case STATUS_IN_PROGRESS:status_str = "IN_PROGRESS"; break;
-            case STATUS_DONE:       status_str = "DONE"; break;
         }
     }
 

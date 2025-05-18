@@ -932,15 +932,13 @@ void *sendFileChunks(void *args) {
         usleep(5000); // Espera 1 ms (ajustable)
 
         if (sentBytes < 0) {
-            customPrintf("[ERROR]: Fallo al enviar trama 0x05. Verificando reconexión...");
             // Se conectó a un nuevo Worker, continuar desde el offset
             usleep(10000);  // Esperar 100ms antes de reintentar
             totalSent -= 247; // Restar el tamaño del chunk enviado
             lseek(fd, totalSent, SEEK_SET); // Volver al offset anterior
-            customPrintf("bytes enviats de moment: %d\n\n", totalSent);
     
             if (errno == EPIPE || errno == ECONNRESET) {
-                customPrintf("[ERROR]: Conexión con Harley perdida. Intentando reasignación...\n");
+                customPrintf("Conexión con Harley perdida. Intentando reasignación...\n");
                 close(workerSocket);
                 workerSocket = -1; 
 
@@ -955,10 +953,8 @@ void *sendFileChunks(void *args) {
 
                 //TODO MIRAR AQUÍ EL CODI QUE ESTÀ PASSANT
                 while (workerSocket != globalState->workerSocket) {
-                    logInfo("[INFO]: Esperando a que el nuevo Harley esté listo para continuar envío...");
                     usleep(1000); // Espera 1ms (ajustable)
                     workerSocket = globalState->workerSocket;
-                    customPrintf("\n\n[DEBUG] Reenviando la trama colgada tras reconexión...\n");
                 } 
             }
             
@@ -1335,7 +1331,7 @@ int main(int argc, char *argv[]) {
     readConfigFileGeneric(argv[1], fleckConfig, CONFIG_FLECK);
 
     customPrintf("\n%s user initialized\n\n", fleckConfig->user);
-    customPrintf("File read correctly: \n");
+    customPrintf("File read correctly.\n");
 
     char *command = NULL;
     while (1) {
