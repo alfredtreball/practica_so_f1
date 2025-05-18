@@ -1082,9 +1082,9 @@ DistortRequestArgs* sendDistortFileRequest(int workerSocket, const char *fileNam
     globalState->workerSocket = workerSocket;
 
     //Dos threads al mateix temps
-    //pthread_mutex_lock(&distortionMutex);
-    //distortionInProgress = 1; // Distorsión en curso
-    //pthread_mutex_unlock(&distortionMutex);
+    pthread_mutex_lock(&distortionMutex);
+    distortionInProgress = 1; // Distorsión en curso
+    pthread_mutex_unlock(&distortionMutex);
 
     // Preparar hilo para enviar las tramas 0x05
                 
@@ -1316,9 +1316,6 @@ void signalHandler(int sig) {
 
 
 int main(int argc, char *argv[]) {
-    customPrintf("\n\nArthur user initialized\n\n");
-    customPrintf("File read correctly: \n");
-
     if (argc != 2) {
         printF("\033[1;31m[ERROR]: Ús: ./fleck <fitxer de configuració>\n\033[0m");
         exit(1);
@@ -1336,6 +1333,9 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, signalHandler);
 
     readConfigFileGeneric(argv[1], fleckConfig, CONFIG_FLECK);
+
+    customPrintf("\n\n%s user initialized\n\n", fleckConfig->user);
+    customPrintf("File read correctly: \n");
 
     char *command = NULL;
     while (1) {

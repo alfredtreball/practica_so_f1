@@ -308,8 +308,8 @@ void listarWorkers(WorkerManager *manager) {
     for (int i = 0; i < manager->workerCount; i++) {
         WorkerInfo *worker = &manager->workers[i];
         char *log_message;
-        asprintf(&log_message, "\nWorker %d: Tipo: %s, IP: %s, Puerto: %d, Socket FD: %d\n",
-                    i + 1, worker->type, worker->ip, worker->port, worker->socket_fd);
+        asprintf(&log_message, "\nWorker %d: Tipus: %s, IP: %s,Port: %d\n",
+                    i + 1, worker->type, worker->ip, worker->port);
         printF(log_message);
         free(log_message);
     }
@@ -1143,9 +1143,6 @@ int main(int argc, char *argv[]) {
         // Manejo de conexiones de Fleck (clientes)
         if (FD_ISSET(server_fds.server_fd_fleck, &read_fds)) {
             int client_fd = accept_connection(server_fds.server_fd_fleck);
-            if (client_fd >= 0) {
-                customPrintf("[DEBUG] Socket %d acceptat (worker)\n", client_fd);
-            }
             if (client_fd >= 0) {
                 pthread_t thread;
                 ConnectionArgs *args = malloc(sizeof(ConnectionArgs));

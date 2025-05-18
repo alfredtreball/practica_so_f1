@@ -73,6 +73,7 @@ typedef struct {
     char userName[64];
 } SendCompressedFileArgs;
 
+
 char receivedFileName[256] = {0}; // Nombre del archivo recibido
 char receivedUserName[64] = {0};
 int tempFileDescriptor = -1;      // Descriptor del archivo temporal

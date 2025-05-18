@@ -131,7 +131,7 @@ void readConfigFileGeneric(const char *configFile, void *configStruct, ConfigTyp
         }
         case CONFIG_FLECK: {
             FleckConfig *config = (FleckConfig *)configStruct;
-            config->user = readUntil(fd, '\n');
+            config->user = trim(readUntil(fd, '\n'));
             config->directory = trim(readUntil(fd, '\n'));
             config->ipGotham = trim(readUntil(fd, '\n'));
 
