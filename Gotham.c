@@ -427,14 +427,13 @@ WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager) {
     if (strcasecmp(extension, ".txt") == 0) {
         if (manager->mainTextWorker && manager->mainTextWorker->ip[0] != '\0') {
             targetWorker = manager->mainTextWorker;
-            customPrintf("\n[INFO]: Worker principal asignado para archivos de texto.\n");
         } else {
             customPrintf("[ERROR]: No hay un Worker principal asignado para archivos de texto.\n");
         }
     } else if (strcasecmp(extension, ".wav") == 0 || strcasecmp(extension, ".png") == 0 || strcasecmp(extension, ".jpg") == 0) {
         if (manager->mainMediaWorker && manager->mainMediaWorker->ip[0] != '\0') {
             targetWorker = manager->mainMediaWorker;
-            customPrintf("\n[INFO]: Worker principal asignado para archivos multimedia.\n");
+
         } else {
             customPrintf("[ERROR]: No hay un Worker principal asignado para archivos multimedia.\n");
         }
@@ -457,7 +456,7 @@ WorkerInfo *buscarWorker(const char *filename, WorkerManager *manager) {
 
     if (targetWorker) {
         char log_message[256];
-        snprintf(log_message, sizeof(log_message), "[INFO]: Worker encontrado -> IP: %s, Puerto: %d\n",
+        snprintf(log_message, sizeof(log_message), "Worker trobat -> IP: %s, Port: %d\n",
                  targetWorker->ip, targetWorker->port);
         printF(log_message);
     } else {
@@ -719,7 +718,7 @@ void processCommandInGotham(const Frame *frame, int client_fd, WorkerManager *ma
             break;
 
         case 0x10: // DISTORT
-            customPrintf("\nProcesando comando DISTORT de Fleck\n");
+            customPrintf("Fleck demana distorsionar un arxiu\n");
 
             // Parsear el payload recibido: mediaType y fileName
             char mediaType[10], fileName[256];
@@ -998,7 +997,7 @@ void handleSigint(int sig) {
         global_config = NULL;
     }
 
-    logSuccess("Sistema tancat correctament.\n");
+    customPrintf("Sistema tancat correctament.\n");
     exit(EXIT_SUCCESS);
 }
 

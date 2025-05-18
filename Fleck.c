@@ -317,7 +317,7 @@ void *listenToHarley() {
                 calculate_md5(globalState->filePath, calculatedMD5);
                 
                 if (strcmp(calculatedMD5, receivedMD5Sum) == 0) {
-                    customPrintf("Envio md5sum correcte a Harley\n");
+                    customPrintf("Envio que md5sum és correcte a Harley\n");
                     sendMD5Response(globalState->workerSocket, "CHECK_OK");
                 } else {
                     customPrintf("MD5 incorrecte. Enviant CHECK_KO a Harley.");
@@ -1334,7 +1334,7 @@ int main(int argc, char *argv[]) {
 
     readConfigFileGeneric(argv[1], fleckConfig, CONFIG_FLECK);
 
-    customPrintf("\n\n%s user initialized\n\n", fleckConfig->user);
+    customPrintf("\n%s user initialized\n\n", fleckConfig->user);
     customPrintf("File read correctly: \n");
 
     char *command = NULL;

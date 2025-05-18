@@ -85,7 +85,7 @@ int send_frame(int socket_fd, const Frame *frame) {
         ssize_t bytesSent = write(socket_fd, buffer + totalSent, FRAME_SIZE - totalSent);
 
         if (bytesSent < 0) {
-            perror("[ERROR][SendFrame] ❌ Error enviando el frame");
+            perror("Error enviando el frame, ha podido caer antes otro servidor o cliente\n");
             return -1;
         }
 
@@ -98,7 +98,7 @@ int send_frame(int socket_fd, const Frame *frame) {
 // Recibe un frame desde un socket
 int receive_frame(int socket_fd, Frame *frame) {
     if (!frame) {
-        fprintf(stderr, "[ERROR][ReceiveFrame] Frame no válido (puntero NULL).\n");
+        fprintf(stderr, "Frame no válido (puntero NULL).\n");
         return -1;
     }
 
@@ -111,7 +111,7 @@ int receive_frame(int socket_fd, Frame *frame) {
         ssize_t bytesRead = read(socket_fd, buffer + totalBytesRead, FRAME_SIZE - totalBytesRead);
 
         if (bytesRead < 0) {
-            perror("[ERROR][ReceiveFrame]  Error recibiendo el frame");
+            perror("Error recibiendo el frame\n");
             return -1;
         } else if (bytesRead == 0) {
             return -1;
@@ -127,7 +127,7 @@ int receive_frame(int socket_fd, Frame *frame) {
 
     // Intentar deserializar el frame ajustado
     if (deserialize_frame(buffer, frame) != 0) {
-        fprintf(stderr, "[ERROR][ReceiveFrame] ❌ Error deserializando el frame recibido\n");
+        fprintf(stderr, "Error deserializando el frame recibido\n");
         return -1;
     }
 

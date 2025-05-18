@@ -22,8 +22,10 @@ COMMON = FileReader/FileReader.c StringUtils/StringUtils.c DataConversion/DataCo
 		 Semafors/semaphore_v2.c
 
 # Objectius per compilar cada executable
-all: Fleck_Montserrat.exe Fleck_Montserrat1.exe Harley_Matagalls.exe \
-     Enigma_Puigpedros.exe Gotham_Montserrat.exe Harley_Matagalls1.exe
+all: Fleck_Montserrat.exe Fleck_Puigpedros.exe Fleck_Matagalls.exe \
+	 Harley_Matagalls.exe Harley_Matagalls1.exe \
+     Enigma_Puigpedros.exe \
+	 Gotham_Montserrat.exe \
 
 # Compilació de Gotham a Montserrat
 Gotham_Montserrat.exe: Gotham.c arkham $(COMMON)
@@ -32,6 +34,12 @@ Gotham_Montserrat.exe: Gotham.c arkham $(COMMON)
 # Compilació de Fleck a Montserrat
 Fleck_Montserrat.exe: Fleck.c $(COMMON)
 	$(CC) $(CFLAGS) Fleck.c $(COMMON) -o Fleck_Montserrat.exe
+
+Fleck_Puigpedros.exe: Fleck.c $(COMMON)
+	$(CC) $(CFLAGS) Fleck.c $(COMMON) -o Fleck_Puigpedros.exe
+
+Fleck_Matagalls.exe: Fleck.c $(COMMON)
+	$(CC) $(CFLAGS) Fleck.c $(COMMON) -o Fleck_Matagalls.exe
 
 # Compilació de Harley a Matagalls
 Harley_Matagalls.exe: Harley.c $(COMMON) Compression/so_compression.o HarleyCompression/compression_handler.c HarleySync/HarleySync.c
@@ -53,6 +61,12 @@ vgm: Gotham_Montserrat.exe
 
 fm: Fleck_Montserrat.exe
 	./Fleck_Montserrat.exe fitxers_configuració/config_fleck.dat
+
+fp: Fleck_Puigpedros.exe
+	./Fleck_Puigpedros.exe fitxers_configuració/config_fleck_pp.dat
+
+fa: Fleck_Matagalls.exe
+	./Fleck_Matagalls.exe fitxers_configuració/config_fleck_ma.dat
 
 vfm: Fleck_Montserrat.exe
 	valgrind --dsymutil=yes --track-origins=yes --leak-check=full --track-fds=yes --show-reachable=yes -s ./Fleck_Montserrat.exe fitxers_configuració/config_fleck.dat
