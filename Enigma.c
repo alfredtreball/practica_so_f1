@@ -757,8 +757,6 @@ void *resume_distortion(void *arg) {
         }
 
         enviaTramaArxiuDistorsionat(args->clientSocket, fileSizeStrCompressed, compressedMD5, filePath, args->offset);
-
-        customPrintf("[SUCCESS] ✅ Envío del archivo comprimido reanudado correctamente desde byte %ld.", args->offset);
     }
     
     free(filePath);

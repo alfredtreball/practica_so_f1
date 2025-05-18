@@ -617,7 +617,7 @@ void *gestionarConexion(void *arg) {
             return NULL;
         }
         if (frame.type == 0x07) { // Trama de desconexión explícita del cliente
-            customPrintf("\n[DEBUG]: Trama de desconexión recibida.\n");
+            customPrintf("\nHe rebut trama de desconnexió.\n");
             handleDisconnectFrame(&frame, client_fd, workerManager, clientManager);
             disconnectHandled = 1;
             break;
@@ -915,7 +915,6 @@ void handleDisconnectFrame(const Frame *frame, int client_fd, WorkerManager *man
                 }
             }
         } else if (isClient) {
-            customPrintf("\nIdentificado como Cliente. Procesando desconexión...\n");
             char *clientName = NULL;
 
             pthread_mutex_lock(&clientManager->mutex);

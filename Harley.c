@@ -57,6 +57,7 @@ pthread_mutex_t heartbeatMutex = PTHREAD_MUTEX_INITIALIZER;
 typedef struct {
     char fileName[256];
     char md5Sum[33];
+    char userName[64];
     size_t offset;
     int factor;
     int status;
@@ -305,7 +306,7 @@ void *handleFleckFrames(void *arg){
                         break;
                     }
 
-                    save_harley_distortion_state(&harleySharedMemory, receivedFileName, 0, atoi(receivedFactor), expectedMD5, clientSocket, STATUS_PENDING);
+                    save_harley_distortion_state(&harleySharedMemory, receivedFileName, 0, atoi(receivedFactor), expectedMD5, clientSocket, STATUS_PENDING, receivedUserName);
 
                     send_frame_with_ok(clientSocket);
                 }
@@ -391,9 +392,10 @@ void *sendCompressedFileToFleck(void *args) {
 
     while ((bytesRead = read(fd, buffer, sizeof(buffer))) > 0) {
         if (!alreadyPrinted) {
-            customPrintf("Sending distorted file to %s\n", userName);
+            customPrintf("\nSending distorted file to %s.\n", userName);
             alreadyPrinted = 1;
         }
+        
         frame.type = 0x05;
         frame.data_length = bytesRead;
         memcpy(frame.data, buffer, bytesRead);
@@ -409,7 +411,7 @@ void *sendCompressedFileToFleck(void *args) {
 
         bytesAcum += bytesRead;
         save_harley_distortion_state(&harleySharedMemory, receivedFileName, bytesAcum, atoi(receivedFactor),
-                                    expectedMD5, clientSocket, STATUS_DONE);
+                                    expectedMD5, clientSocket, STATUS_DONE, receivedUserName);
 
         usleep(10000);
     }
@@ -489,12 +491,12 @@ void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSi
 
     lseek(tempFileDescriptor, 0, SEEK_SET);
     *currentFileSize = lseek(tempFileDescriptor, 0, SEEK_END);
-    save_harley_distortion_state(&harleySharedMemory, receivedFileName, *currentFileSize, atoi(receivedFactor), expectedMD5, clientSocket, STATUS_PENDING);
+    save_harley_distortion_state(&harleySharedMemory, receivedFileName, *currentFileSize, atoi(receivedFactor), expectedMD5, clientSocket, STATUS_PENDING, receivedUserName);
 
     // Verificar si se recibió el archivo completo
     if (*currentFileSize == expectedFileSize) {
         distortionLogged = 0;
-        save_harley_distortion_state(&harleySharedMemory, receivedFileName, *currentFileSize, atoi(receivedFactor), expectedMD5, clientSocket, STATUS_IN_PROGRESS);
+        save_harley_distortion_state(&harleySharedMemory, receivedFileName, *currentFileSize, atoi(receivedFactor), expectedMD5, clientSocket, STATUS_IN_PROGRESS, receivedUserName);
 
         // Cerrar el archivo temporal
         close(tempFileDescriptor);
@@ -520,7 +522,7 @@ void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSi
         if (strcmp(expectedMD5, calculatedMD5) == 0) {
             sendMD5Response(clientSocket, "CHECK_OK");
             
-            save_harley_distortion_state(&harleySharedMemory, receivedFileName, *currentFileSize, atoi(receivedFactor), expectedMD5, clientSocket, STATUS_IN_PROGRESS);
+            save_harley_distortion_state(&harleySharedMemory, receivedFileName, *currentFileSize, atoi(receivedFactor), expectedMD5, clientSocket, STATUS_IN_PROGRESS, receivedUserName);
             
             // Procesar la compresión
             int result = process_compression(finalFilePath, atoi(receivedFactor));
@@ -578,7 +580,7 @@ void processBinaryFrameFromFleck(BinaryFrame *binaryFrame, size_t expectedFileSi
             }
 
             // Guardar estado como `STATUS_DONE` porque la compresión ha finalizado y está listo para enviarse
-            save_harley_distortion_state(&harleySharedMemory, receivedFileName, *currentFileSize, atoi(receivedFactor), compressedMD5, clientSocket, STATUS_DONE);
+            save_harley_distortion_state(&harleySharedMemory, receivedFileName, *currentFileSize, atoi(receivedFactor), compressedMD5, clientSocket, STATUS_DONE, receivedUserName);
 
             // Enviar la trama del archivo distorsionado
             enviaTramaArxiuDistorsionat(clientSocket, fileSizeStrCompressed, compressedMD5, compressedFilePath, 0);
@@ -673,7 +675,7 @@ void *resume_distortion(void *arg) {
 
     if (args->status == STATUS_PENDING) {
         save_harley_distortion_state(&harleySharedMemory, args->fileName, args->offset,
-                                     args->factor, args->md5Sum, args->clientSocket, STATUS_PENDING);
+                                     args->factor, args->md5Sum, args->clientSocket, STATUS_PENDING, args->userName);
         free(filePath);
         free(args);
         return NULL;
@@ -705,11 +707,11 @@ void *resume_distortion(void *arg) {
             return NULL;
         }
         
-        customPrintf("Compresión completada correctamente.\n");
+        customPrintf("\nCompresión completada correctamente.\n");
         
         // Guardar el estado como STATUS_DONE para reanudar el envío del archivo
         save_harley_distortion_state(&harleySharedMemory, args->fileName, 0, args->factor,
-            args->md5Sum, args->clientSocket, STATUS_DONE);
+            args->md5Sum, args->clientSocket, STATUS_DONE, args->userName);
         args->status = STATUS_DONE;
         args->offset = 0;
     }
@@ -753,8 +755,6 @@ void *resume_distortion(void *arg) {
         }
 
         enviaTramaArxiuDistorsionat(args->clientSocket, fileSizeStrCompressed, compressedMD5, filePath, args->offset);
-
-        customPrintf("[SUCCESS] ✅ Envío del archivo comprimido reanudado correctamente desde byte %ld.", args->offset);
     }
     
     free(filePath);
@@ -934,6 +934,7 @@ int main(int argc, char *argv[]){
                 ResumeArgs *args = malloc(sizeof(ResumeArgs));
                 strncpy(args->fileName, recoveredDistortions[i].fileName, sizeof(args->fileName));
                 strncpy(args->md5Sum, recoveredDistortions[i].md5Sum, sizeof(args->md5Sum));
+                strncpy(args->userName, recoveredDistortions[i].userName, sizeof(args->userName)); // NOVA LÍNIA
                 args->offset = recoveredDistortions[i].currentByte;
                 args->factor = recoveredDistortions[i].factor;
                 args->status = recoveredDistortions[i].status;

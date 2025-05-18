@@ -13,7 +13,7 @@
 #include <sys/stat.h>
 #include <stdio.h>
 
-#define LOG_FILE "arkham_log.txt"
+#define LOG_FILE "logs.txt"
 #define BUFFER_SIZE 512
 
 // Escriu missatge amb timestamp a file descriptor
@@ -39,7 +39,7 @@ int main() {
     char *newline;
 
     // Obre fitxer de log en mode append, amb permisos rw-r--r--
-    int fd_log = open(LOG_FILE, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    int fd_log = open(LOG_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd_log < 0) {
         _exit(EXIT_FAILURE);
     }

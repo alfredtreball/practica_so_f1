@@ -52,7 +52,6 @@ int deserialize_frame(const char *buffer, Frame *frame) {
 
     // Validar que se hayan leído los campos obligatorios
     if (fields_read < 4) { // DATA es opcional si DATA_LENGTH = 0
-        fprintf(stderr, "[ERROR][Deserialize] Formato inválido en el frame\n");
         return -1;
     }
 

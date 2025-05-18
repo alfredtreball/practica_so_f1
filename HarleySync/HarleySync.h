@@ -12,6 +12,7 @@
 
 // Estructura para almacenar el estado de una distorsión en Harley
 typedef struct {
+    char userName[64]; 
     char fileName[256];   // Nombre del archivo en proceso
     char md5Sum[33];      // MD5 del archivo en proceso
     size_t currentByte;   // Posición actual del archivo
@@ -31,7 +32,7 @@ int init_shared_memory(SharedMemory *sm, key_t key, size_t size);
 
 // Guarda el estado actual de una distorsión en memoria compartida
 int save_harley_distortion_state(SharedMemory *sm, const char *fileName, size_t currentByte, 
-    int factor, const char *md5Sum, int fleckSocketFD, int status);
+    int factor, const char *md5Sum, int fleckSocketFD, int status, const char *userName);
 
 // Recupera todas las distorsiones en curso
 int load_harley_distortion_state(SharedMemory *sm, HarleyDistortionEntry *entries, int *count);

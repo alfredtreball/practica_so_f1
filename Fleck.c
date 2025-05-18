@@ -241,8 +241,6 @@ void *listenToHarley() {
         int is_binary = -1;
         
         if (receive_any_frame(globalState->workerSocket, &frame, &is_binary) != 0) {
-            customPrintf("Error recibiendo trama. Posible caída de Harley.\n");
-        
             // Detectar socket cerrado
             char tmp;
             int ret = recv(globalState->workerSocket, &tmp, 1, MSG_PEEK);
@@ -255,13 +253,13 @@ void *listenToHarley() {
                     return NULL;
                 }
 
-                return NULL;
-        
                 // Esperar hasta que el nuevo socket esté listo
                 while (workerSocket != globalState->workerSocket) {
                     usleep(10000000);
                     workerSocket = globalState->workerSocket;
                 }
+
+                return NULL;
 
                 continue; // volver al bucle y seguir recibiendo
             } else {
@@ -346,8 +344,6 @@ void *listenToHarley() {
                     char buf[1];
                     int ret = recv(globalState->workerSocket, buf, 1, MSG_PEEK);
                     if (ret == 0) {
-                        customPrintf("[INFO]: Socket de Harley cerrado tras CHECK_OK. Reasignando...\n");
-
                         if (!solicitarReasignacionAWorker(globalState)) {
                             customPrintf("[ERROR]: No se pudo reasignar el Worker.");
                             free(globalState);
@@ -359,7 +355,7 @@ void *listenToHarley() {
                             workerSocket = globalState->workerSocket;
                         }
 
-                        customPrintf("[INFO]: Nuevo Harley asignado. Esperando archivo distorsionado...\n");
+                        customPrintf("Nou Harley assignat\n");
                     }
                 } else if (strcmp(request->data, "CHECK_KO") == 0) {
                     customPrintf("[ERROR]: Harley ha reportado un error en la comprobación MD5 del archivo recibido de Fleck (CHECK_KO).");
@@ -623,13 +619,13 @@ void *listenToGotham(void *arg) {
                     break;
                 }
             
-                customPrintf("[SUCCESS]: Conexión establecida con el nuevo Worker. IP = %s, PORT = %d\n", workerIp, workerPort);
+                customPrintf("Connectat a nou worker\n");
                 usleep(1000); //1ms d'espera
                 globalState->workerSocket = newWorkerSocket; // Actualizar el socket global del Worker
                 
                 sendDistortFileRequest(newWorkerSocket, globalState->fileName, globalState->fileSize, globalState->md5, globalState->factor);  
                 
-                //AFEGIT - NOU FIL DE RECEPCIÓ
+                //NOU FIL DE RECEPCIÓ
                 pthread_t harleyListenerThread;
                 int *socketArg = malloc(sizeof(int));
                 if (!socketArg) {
@@ -639,7 +635,7 @@ void *listenToGotham(void *arg) {
 
                 *socketArg = newWorkerSocket;
                 if (pthread_create(&harleyListenerThread, NULL, listenToHarley, socketArg) != 0) {
-                    perror("pthread_create"); // Mostrará el motivo (ej: ENOMEM)
+                    perror("pthread_create");
                     customPrintf("[ERROR]: No se pudo crear el hilo para escuchar a Harley.");
                     return NULL;
                 }
@@ -760,8 +756,6 @@ void clearAllFinishedProgress() {
     }
 
     pthread_mutex_unlock(&progressMutex);
-
-    customPrintf("Completed downloads have been cleared from progress list.\n");
 }
 
 void processCommandWithGotham(const char *command) {
@@ -862,7 +856,7 @@ void processCommand(char *command, int gothamSocket) {
             customPrintf("Unknown command.");
         }
     } else if (strcasecmp(cmd, "CLEAR") == 0 && strcasecmp(subCmd, "ALL") == 0 && extra == NULL) {
-        customPrintf("[INFO]: Clearing all completed downloads...\n");
+        customPrintf("Borrant distorsions completades\n");
         clearAllFinishedProgress();    
     } else if (strcasecmp(cmd, "LOGOUT") == 0 && subCmd == NULL) {
         logInfo("Thanks for using Mr. J System, see you soon, chaos lover :)\n");

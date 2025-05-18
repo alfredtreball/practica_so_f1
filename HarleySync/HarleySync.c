@@ -38,7 +38,7 @@ int init_shared_memory(SharedMemory *sm, key_t key, size_t size) {
 
 // Guarda el estado exacto de la distorsión en curso
 int save_harley_distortion_state(SharedMemory *sm, const char *fileName, size_t currentByte, 
-    int factor, const char *md5Sum, int fleckSocketFD, int status) {
+    int factor, const char *md5Sum, int fleckSocketFD, int status, const char *userName) {
     
     if (!sm || !sm->shmaddr) {
         customPrintf("[ERROR] ❌ Memoria compartida no inicializada antes de guardar estado.\n");
@@ -51,8 +51,8 @@ int save_harley_distortion_state(SharedMemory *sm, const char *fileName, size_t 
     int found = 0;
 
     for (int i = 0; i < state->count; i++) {
-        if (strcmp(state->distortions[i].fileName, fileName) == 0) {
-            // 📌 Actualizar distorsión existente
+        if (strcmp(state->distortions[i].fileName, fileName) == 0 && strcmp(state->distortions[i].userName, userName) == 0) {
+            //Actualizar distorsión existente
             state->distortions[i].currentByte = currentByte;
             state->distortions[i].factor = factor;
             strncpy(state->distortions[i].md5Sum, md5Sum, sizeof(state->distortions[i].md5Sum));
@@ -68,6 +68,7 @@ int save_harley_distortion_state(SharedMemory *sm, const char *fileName, size_t 
         if (state->count < MAX_DISTORTIONS) {
             strncpy(state->distortions[state->count].fileName, fileName, sizeof(state->distortions[state->count].fileName) - 1);
             strncpy(state->distortions[state->count].md5Sum, md5Sum, sizeof(state->distortions[state->count].md5Sum));
+            strncpy(state->distortions[state->count].userName, userName, sizeof(state->distortions[state->count].userName));
             state->distortions[state->count].currentByte = currentByte;
             state->distortions[state->count].factor = factor;
             state->distortions[state->count].fleckSocketFD = fleckSocketFD;
